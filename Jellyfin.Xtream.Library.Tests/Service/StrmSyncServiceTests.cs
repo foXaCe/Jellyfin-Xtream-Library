@@ -250,6 +250,48 @@ public class StrmSyncServiceTests
     }
 
     [Theory]
+    [InlineData("| Barry", "Barry")]
+    [InlineData("| The Matrix", "The Matrix")]
+    [InlineData("DV| Silo", "Silo")]
+    [InlineData("DV| Barry", "Barry")]
+    [InlineData("+| Inception", "Inception")]
+    [InlineData("+| The Flash", "The Flash")]
+    [InlineData("| FR | Arrow", "Arrow")]
+    [InlineData("DV| FR | Lucifer", "Lucifer")]
+    [InlineData("| FR | 4K | Les Indestructibles 2", "Les Indestructibles 2")]
+    [InlineData("DV| FR | 4K | Silo", "Silo")]
+    [InlineData("+| FR | HDR | Movie", "Movie")]
+    public void SanitizeFileName_OrphanPipePrefix_RemovesThem(string input, string expected)
+    {
+        var result = StrmSyncService.SanitizeFileName(input);
+
+        result.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("EN - Adventure Time", "Adventure Time")]
+    [InlineData("US - Breaking Bad", "Breaking Bad")]
+    [InlineData("FR - Lupin", "Lupin")]
+    [InlineData("DE - Dark", "Dark")]
+    public void SanitizeFileName_DashCountryCodePrefix_RemovesThem(string input, string expected)
+    {
+        var result = StrmSyncService.SanitizeFileName(input);
+
+        result.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("FBI - Most Wanted")]
+    [InlineData("CSI - Vegas")]
+    [InlineData("NCIS - Los Angeles")]
+    public void SanitizeFileName_DashPrefix_PreservesNonCountryCodes(string input)
+    {
+        var result = StrmSyncService.SanitizeFileName(input);
+
+        result.Should().Be(input);
+    }
+
+    [Theory]
     [InlineData("Ascendance of a Bookworm[本好きの下剋上]", "Ascendance of a Bookworm")]
     [InlineData("Show Name [日本語タイトル]", "Show Name")]
     [InlineData("Anime (韓国語)", "Anime")]
@@ -905,6 +947,24 @@ public class StrmSyncServiceTests
         string url = $"{baseUrl}/movie/{username}/{password}/{streamId}.{extension}";
 
         url.Should().Be("http://dispatcharr.local:5656/movie/user/pass/12345.mp4");
+    }
+
+    #endregion
+
+    #region IsExcludedByLanguage Tests
+
+    [Theory]
+    [InlineData("| FR | The Matrix (VOSTFR) (1999)", "VOSTFR\nVO\nVFQ", true)]
+    [InlineData("Bob Marley - One Love (VFQ)", "VOSTFR\nVO\nVFQ", true)]
+    [InlineData("DV| Kill Bill (VO)", "VOSTFR\nVO\nVFQ", true)]
+    [InlineData("The Matrix (1999)", "VOSTFR\nVO\nVFQ", false)]
+    [InlineData("| FR | Arrow", "VOSTFR\nVO\nVFQ", false)]
+    [InlineData("The Matrix (VOSTFR)", "", false)]
+    [InlineData("The Matrix (VOSTFR)", null, false)]
+    [InlineData(null, "VOSTFR", false)]
+    public void IsExcludedByLanguage_MatchesCorrectly(string? name, string? tags, bool expected)
+    {
+        StrmSyncService.IsExcludedByLanguage(name, tags).Should().Be(expected);
     }
 
     #endregion

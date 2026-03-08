@@ -51,9 +51,10 @@ public static class NfoWriter
         CancellationToken cancellationToken)
     {
         bool hasMedia = HasUsableData(video, audio);
+        bool hasDuration = durationSecs.HasValue && durationSecs.Value > 0;
 
-        // Skip if no provider ID and no media info
-        if (!tmdbId.HasValue && !hasMedia)
+        // Skip if no provider ID and no media info at all
+        if (!tmdbId.HasValue && !hasMedia && !hasDuration)
         {
             return false;
         }
@@ -73,7 +74,7 @@ public static class NfoWriter
             sb.Append("  <uniqueid type=\"tmdb\" default=\"true\">").Append(tmdbId.Value.ToString(CultureInfo.InvariantCulture)).AppendLine("</uniqueid>");
         }
 
-        if (hasMedia)
+        if (hasMedia || hasDuration)
         {
             AppendFileInfo(sb, video, audio, durationSecs);
         }
@@ -153,7 +154,9 @@ public static class NfoWriter
         CancellationToken cancellationToken)
     {
         // Skip if no usable media info available
-        if (!HasUsableData(video, audio))
+        bool hasMedia = HasUsableData(video, audio);
+        bool hasDuration = durationSecs.HasValue && durationSecs.Value > 0;
+        if (!hasMedia && !hasDuration)
         {
             return false;
         }
@@ -166,7 +169,10 @@ public static class NfoWriter
         sb.Append("  <season>").Append(seasonNumber.ToString(CultureInfo.InvariantCulture)).AppendLine("</season>");
         sb.Append("  <episode>").Append(episodeNumber.ToString(CultureInfo.InvariantCulture)).AppendLine("</episode>");
 
-        AppendFileInfo(sb, video, audio, durationSecs);
+        if (hasMedia || hasDuration)
+        {
+            AppendFileInfo(sb, video, audio, durationSecs);
+        }
 
         sb.AppendLine("</episodedetails>");
 
@@ -179,38 +185,45 @@ public static class NfoWriter
         sb.AppendLine("  <fileinfo>");
         sb.AppendLine("    <streamdetails>");
 
-        if (video != null)
+        bool hasVideoContent = video != null &&
+            (!string.IsNullOrEmpty(video.CodecName) || video.Width > 0 || video.Height > 0 || !string.IsNullOrEmpty(video.AspectRatio));
+        bool hasDuration = durationSecs.HasValue && durationSecs.Value > 0;
+
+        if (hasVideoContent || hasDuration)
         {
             sb.AppendLine("      <video>");
 
-            if (!string.IsNullOrEmpty(video.CodecName))
+            if (video != null)
             {
-                sb.Append("        <codec>").Append(EscapeXml(video.CodecName)).AppendLine("</codec>");
-            }
-
-            if (video.Width > 0)
-            {
-                sb.Append("        <width>").Append(video.Width.ToString(CultureInfo.InvariantCulture)).AppendLine("</width>");
-            }
-
-            if (video.Height > 0)
-            {
-                sb.Append("        <height>").Append(video.Height.ToString(CultureInfo.InvariantCulture)).AppendLine("</height>");
-            }
-
-            if (!string.IsNullOrEmpty(video.AspectRatio))
-            {
-                // Convert "16:9" to decimal aspect ratio
-                var aspectDecimal = ParseAspectRatio(video.AspectRatio);
-                if (aspectDecimal.HasValue)
+                if (!string.IsNullOrEmpty(video.CodecName))
                 {
-                    sb.Append("        <aspect>").Append(aspectDecimal.Value.ToString("F2", CultureInfo.InvariantCulture)).AppendLine("</aspect>");
+                    sb.Append("        <codec>").Append(EscapeXml(video.CodecName)).AppendLine("</codec>");
+                }
+
+                if (video.Width > 0)
+                {
+                    sb.Append("        <width>").Append(video.Width.ToString(CultureInfo.InvariantCulture)).AppendLine("</width>");
+                }
+
+                if (video.Height > 0)
+                {
+                    sb.Append("        <height>").Append(video.Height.ToString(CultureInfo.InvariantCulture)).AppendLine("</height>");
+                }
+
+                if (!string.IsNullOrEmpty(video.AspectRatio))
+                {
+                    // Convert "16:9" to decimal aspect ratio
+                    var aspectDecimal = ParseAspectRatio(video.AspectRatio);
+                    if (aspectDecimal.HasValue)
+                    {
+                        sb.Append("        <aspect>").Append(aspectDecimal.Value.ToString("F2", CultureInfo.InvariantCulture)).AppendLine("</aspect>");
+                    }
                 }
             }
 
-            if (durationSecs.HasValue && durationSecs.Value > 0)
+            if (hasDuration)
             {
-                sb.Append("        <durationinseconds>").Append(durationSecs.Value.ToString(CultureInfo.InvariantCulture)).AppendLine("</durationinseconds>");
+                sb.Append("        <durationinseconds>").Append(durationSecs!.Value.ToString(CultureInfo.InvariantCulture)).AppendLine("</durationinseconds>");
             }
 
             sb.AppendLine("      </video>");
@@ -235,6 +248,32 @@ public static class NfoWriter
 
         sb.AppendLine("    </streamdetails>");
         sb.AppendLine("  </fileinfo>");
+    }
+
+    /// <summary>
+    /// Checks whether an existing NFO file already contains media stream details.
+    /// </summary>
+    /// <param name="nfoPath">Path to the NFO file.</param>
+    /// <returns>True if the NFO exists and contains a streamdetails section.</returns>
+    public static bool NfoHasMediaInfo(string nfoPath)
+    {
+        if (!File.Exists(nfoPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var content = File.ReadAllText(nfoPath);
+            // Check for actual content inside streamdetails (video or audio sections)
+            return content.Contains("<streamdetails>", StringComparison.OrdinalIgnoreCase) &&
+                   (content.Contains("<video>", StringComparison.OrdinalIgnoreCase) ||
+                    content.Contains("<audio>", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (IOException)
+        {
+            return false;
+        }
     }
 
     private static bool HasUsableData(VideoInfo? video, AudioInfo? audio)

@@ -80,6 +80,9 @@ const XtreamLibraryConfig = {
             // Custom title removal terms
             var txtCustomTerms = document.getElementById('txtCustomTitleRemoveTerms');
             if (txtCustomTerms) txtCustomTerms.value = config.CustomTitleRemoveTerms || '';
+            // Excluded language tags
+            var txtExcludedLang = document.getElementById('txtExcludedLanguageTags');
+            if (txtExcludedLang) txtExcludedLang.value = config.ExcludedLanguageTags || '';
             document.getElementById('txtSyncParallelism').value = config.SyncParallelism || 10;
             document.getElementById('txtCategoryBatchSize').value = config.CategoryBatchSize || 25;
 
@@ -210,6 +213,9 @@ const XtreamLibraryConfig = {
             // Custom title removal terms
             var txtCustomTermsSave = document.getElementById('txtCustomTitleRemoveTerms');
             if (txtCustomTermsSave) config.CustomTitleRemoveTerms = txtCustomTermsSave.value;
+            // Excluded language tags
+            var txtExcludedLangSave = document.getElementById('txtExcludedLanguageTags');
+            if (txtExcludedLangSave) config.ExcludedLanguageTags = txtExcludedLangSave.value;
 
             // Rate limiting
             config.RequestDelayMs = parseInt(document.getElementById('txtRequestDelayMs').value) || 50;
@@ -367,12 +373,12 @@ const XtreamLibraryConfig = {
         if (mode === 'Multiple') {
             singleSection.style.display = 'none';
             multiSection.style.display = 'block';
-            descElem.textContent = 'Create folders and assign categories to each. Categories can be in multiple folders.';
+            descElem.textContent = 'Cr\u00e9ez des dossiers et assignez des cat\u00e9gories \u00e0 chacun. Les cat\u00e9gories peuvent appartenir \u00e0 plusieurs dossiers.';
             this.renderFolderList(type);
         } else {
             singleSection.style.display = 'block';
             multiSection.style.display = 'none';
-            descElem.textContent = 'Select specific categories to sync. Leave all unchecked to sync all categories.';
+            descElem.textContent = 'S\u00e9lectionnez les cat\u00e9gories \u00e0 synchroniser. Laissez tout d\u00e9coch\u00e9 pour synchroniser toutes les cat\u00e9gories.';
         }
     },
 
@@ -398,7 +404,7 @@ const XtreamLibraryConfig = {
         var container = document.getElementById(listId);
 
         if (categories.length === 0) {
-            container.innerHTML = '<div class="fieldDescription">Load categories first to configure folders.</div>';
+            container.innerHTML = '<div class="fieldDescription">Chargez d\'abord les cat\u00e9gories pour configurer les dossiers.</div>';
             return;
         }
 
@@ -408,8 +414,8 @@ const XtreamLibraryConfig = {
         definitions.forEach(function (folder, folderIndex) {
             html += '<div class="folder-item" data-folder-index="' + folderIndex + '">';
             html += '<div class="folder-item-header">';
-            html += '<input type="text" class="folder-name-input" placeholder="Folder name (e.g., Kids)" value="' + self.escapeHtml(folder.name) + '" style="padding: 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.3); color: #fff;"/>';
-            html += '<button type="button" class="raised" onclick="XtreamLibraryConfig.removeFolder(\'' + type + '\', ' + folderIndex + ')" style="background: #c0392b; padding: 8px 12px; border: none; border-radius: 4px; color: #fff; cursor: pointer;">Remove</button>';
+            html += '<input type="text" class="folder-name-input" placeholder="Nom du dossier (ex. : Enfants)" value="' + self.escapeHtml(folder.name) + '" style="padding: 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.3); color: #fff;"/>';
+            html += '<button type="button" class="raised" onclick="XtreamLibraryConfig.removeFolder(\'' + type + '\', ' + folderIndex + ')" style="background: #c0392b; padding: 8px 12px; border: none; border-radius: 4px; color: #fff; cursor: pointer;">Supprimer</button>';
             html += '</div>';
             html += '<div class="category-list">';
 
@@ -432,7 +438,7 @@ const XtreamLibraryConfig = {
         });
 
         if (definitions.length === 0) {
-            html += '<div class="fieldDescription">No folders defined. Click "Add Folder" to create one.</div>';
+            html += '<div class="fieldDescription">Aucun dossier d\u00e9fini. Cliquez sur \u00ab + Ajouter un dossier \u00bb pour en cr\u00e9er un.</div>';
         }
 
         container.innerHTML = html;
@@ -464,7 +470,7 @@ const XtreamLibraryConfig = {
 
     testConnection: function () {
         const statusSpan = document.getElementById('connectionStatus');
-        statusSpan.innerHTML = '<span style="color: orange;">Testing...</span>';
+        statusSpan.innerHTML = '<span style="color: orange;">Test en cours...</span>';
 
         const baseUrl = document.getElementById('txtBaseUrl').value.trim().replace(/\/$/, '');
 
@@ -472,7 +478,7 @@ const XtreamLibraryConfig = {
         try {
             new URL(baseUrl);
         } catch (e) {
-            statusSpan.innerHTML = '<span style="color: red;">Invalid URL format. Must include protocol (http:// or https://)</span>';
+            statusSpan.innerHTML = '<span style="color: red;">Format d\'URL invalide. Doit inclure le protocole (http:// ou https://)</span>';
             return;
         }
 
@@ -499,7 +505,7 @@ const XtreamLibraryConfig = {
             }
         }).catch(function (error) {
             console.error('TestConnection error:', error);
-            statusSpan.innerHTML = '<span style="color: red;">Connection failed: ' + (error.message || 'Check console for details') + '</span>';
+            statusSpan.innerHTML = '<span style="color: red;">\u00c9chec de connexion : ' + (error.message || 'V\u00e9rifiez la console pour les d\u00e9tails') + '</span>';
         });
     },
 
@@ -512,7 +518,7 @@ const XtreamLibraryConfig = {
         const self = this;
 
         self.isSyncing = true;
-        syncBtn.querySelector('span').textContent = 'Cancel Sync';
+        syncBtn.querySelector('span').textContent = 'Annuler la synchro';
         syncBtn.style.background = '#c0392b';
 
         // Start sync in background
@@ -526,22 +532,22 @@ const XtreamLibraryConfig = {
         }).then(function (data) {
             if (data.Success) {
                 // Sync started successfully, begin polling for progress and completion
-                statusSpan.innerHTML = '<span style="color: orange;">Sync started...</span>';
+                statusSpan.innerHTML = '<span style="color: orange;">Synchronisation lanc\u00e9e...</span>';
                 self.startProgressPolling();
                 self.pollForCompletion();
             } else if (data.Message && data.Message.includes('already in progress')) {
                 // Sync already running, just start polling
-                statusSpan.innerHTML = '<span style="color: orange;">Sync already in progress...</span>';
+                statusSpan.innerHTML = '<span style="color: orange;">Synchronisation d\u00e9j\u00e0 en cours...</span>';
                 self.startProgressPolling();
                 self.pollForCompletion();
             } else {
                 self.resetSyncButton();
-                statusSpan.innerHTML = '<span style="color: red;">Failed to start sync: ' + (data.Message || 'Unknown error') + '</span>';
+                statusSpan.innerHTML = '<span style="color: red;">\u00c9chec du lancement de la synchro : ' + (data.Message || 'Erreur inconnue') + '</span>';
             }
         }).catch(function (error) {
             self.resetSyncButton();
             console.error('Sync error:', error);
-            statusSpan.innerHTML = '<span style="color: red;">Sync failed: ' + (error.message || 'Check console for details') + '</span>';
+            statusSpan.innerHTML = '<span style="color: red;">\u00c9chec de la synchro : ' + (error.message || 'V\u00e9rifiez la console pour les d\u00e9tails') + '</span>';
         });
     },
 
@@ -575,11 +581,11 @@ const XtreamLibraryConfig = {
                     }).then(function (result) {
                         if (result) {
                             if (result.Success) {
-                                statusSpan.innerHTML = '<span style="color: green;">Sync completed!</span>';
+                                statusSpan.innerHTML = '<span style="color: green;">Synchronisation termin\u00e9e !</span>';
                             } else if (result.Error && result.Error.toLowerCase().includes('cancel')) {
-                                statusSpan.innerHTML = '<span style="color: orange;">Sync was cancelled.</span>';
+                                statusSpan.innerHTML = '<span style="color: orange;">Synchronisation annul\u00e9e.</span>';
                             } else {
-                                statusSpan.innerHTML = '<span style="color: red;">Sync failed: ' + (result.Error || 'Unknown error') + '</span>';
+                                statusSpan.innerHTML = '<span style="color: red;">\u00c9chec de la synchro : ' + (result.Error || 'Erreur inconnue') + '</span>';
                             }
                         }
                     });
@@ -597,7 +603,7 @@ const XtreamLibraryConfig = {
 
     cancelSync: function () {
         const statusSpan = document.getElementById('syncStatus');
-        statusSpan.innerHTML = '<span style="color: orange;">Cancelling sync...</span>';
+        statusSpan.innerHTML = '<span style="color: orange;">Annulation de la synchro...</span>';
 
         fetch(ApiClient.getUrl('XtreamLibrary/Cancel'), {
             method: 'POST',
@@ -614,14 +620,14 @@ const XtreamLibraryConfig = {
     resetSyncButton: function () {
         const syncBtn = document.getElementById('btnManualSync');
         this.isSyncing = false;
-        syncBtn.querySelector('span').textContent = 'Run Sync Now';
+        syncBtn.querySelector('span').textContent = 'Lancer la synchro';
         syncBtn.style.background = '';
     },
 
     startProgressPolling: function () {
         const self = this;
         const statusSpan = document.getElementById('syncStatus');
-        statusSpan.innerHTML = '<span style="color: orange;">Starting sync...</span>';
+        statusSpan.innerHTML = '<span style="color: orange;">D\u00e9marrage de la synchro...</span>';
 
         self.progressInterval = setInterval(function () {
             fetch(ApiClient.getUrl('XtreamLibrary/Progress'), {
@@ -659,25 +665,25 @@ const XtreamLibraryConfig = {
             html += progress.Phase;
         }
         if (progress.CurrentItem) {
-            html += ': ' + this.escapeHtml(progress.CurrentItem);
+            html += ' : ' + this.escapeHtml(progress.CurrentItem);
         }
         if (progress.TotalCategories > 0) {
-            html += '<br/>Batches: ' + progress.CategoriesProcessed + '/' + progress.TotalCategories;
+            html += '<br/>Lots : ' + progress.CategoriesProcessed + '/' + progress.TotalCategories;
         }
         if (progress.TotalItems > 0) {
-            html += ' | Items: ' + progress.ItemsProcessed + '/' + progress.TotalItems;
+            html += ' | \u00c9l\u00e9ments : ' + progress.ItemsProcessed + '/' + progress.TotalItems;
         }
         const created = [];
-        if (progress.MoviesCreated > 0) created.push(progress.MoviesCreated + ' movies');
-        if (progress.EpisodesCreated > 0) created.push(progress.EpisodesCreated + ' episodes');
+        if (progress.MoviesCreated > 0) created.push(progress.MoviesCreated + ' films');
+        if (progress.EpisodesCreated > 0) created.push(progress.EpisodesCreated + ' \u00e9pisodes');
         if (created.length > 0) {
-            html += '<br/>Created: ' + created.join(', ');
+            html += '<br/>Cr\u00e9\u00e9s : ' + created.join(', ');
         }
         const updated = [];
-        if ((progress.MoviesUpdated || 0) > 0) updated.push(progress.MoviesUpdated + ' movies');
-        if ((progress.EpisodesUpdated || 0) > 0) updated.push(progress.EpisodesUpdated + ' episodes');
+        if ((progress.MoviesUpdated || 0) > 0) updated.push(progress.MoviesUpdated + ' films');
+        if ((progress.EpisodesUpdated || 0) > 0) updated.push(progress.EpisodesUpdated + ' \u00e9pisodes');
         if (updated.length > 0) {
-            html += '<br/>Updated: ' + updated.join(', ');
+            html += '<br/>Mis \u00e0 jour : ' + updated.join(', ');
         }
         html += '</span>';
         statusSpan.innerHTML = html;
@@ -714,7 +720,7 @@ const XtreamLibraryConfig = {
             if (progress && progress.IsRunning) {
                 var syncBtn = document.getElementById('btnManualSync');
                 self.isSyncing = true;
-                syncBtn.querySelector('span').textContent = 'Cancel Sync';
+                syncBtn.querySelector('span').textContent = 'Annuler la synchro';
                 syncBtn.style.background = '#c0392b';
                 self.displayProgress(progress);
                 self.startProgressPolling();
@@ -733,8 +739,8 @@ const XtreamLibraryConfig = {
         var hours = Math.floor(minutes / 60);
         seconds = seconds % 60;
         minutes = minutes % 60;
-        if (hours > 0) return hours + 'h ' + minutes + 'm ' + seconds + 's';
-        if (minutes > 0) return minutes + 'm ' + seconds + 's';
+        if (hours > 0) return hours + 'h ' + minutes + 'min ' + seconds + 's';
+        if (minutes > 0) return minutes + 'min ' + seconds + 's';
         return seconds + 's';
     },
 
@@ -747,35 +753,35 @@ const XtreamLibraryConfig = {
         }
 
         const startTime = new Date(result.StartTime).toLocaleString();
-        const status = result.Success ? '<span style="color: green;">Success</span>' : '<span style="color: red;">Failed</span>';
+        const status = result.Success ? '<span style="color: green;">Succ\u00e8s</span>' : '<span style="color: red;">\u00c9chec</span>';
         const duration = this.formatDuration(result.StartTime, result.EndTime);
 
         // Sync type badge
         var syncBadge = '';
         if (result.WasIncrementalSync) {
-            syncBadge = '<span style="background: #1a5276; color: #85c1e9; padding: 2px 8px; border-radius: 4px; font-size: 0.85em; margin-left: 8px;">Incremental</span>';
+            syncBadge = '<span style="background: #1a5276; color: #85c1e9; padding: 2px 8px; border-radius: 4px; font-size: 0.85em; margin-left: 8px;">Incr\u00e9mentale</span>';
         } else {
-            syncBadge = '<span style="background: #1e3a1e; color: #82e0aa; padding: 2px 8px; border-radius: 4px; font-size: 0.85em; margin-left: 8px;">Full Sync</span>';
+            syncBadge = '<span style="background: #1e3a1e; color: #82e0aa; padding: 2px 8px; border-radius: 4px; font-size: 0.85em; margin-left: 8px;">Compl\u00e8te</span>';
         }
 
-        let html = '<strong>Last Sync:</strong> ' + startTime + ' - ' + status + syncBadge;
-        html += '<br/><span style="color: #aaa;">Duration: ' + duration + '</span><br/><br/>';
-        html += '<strong>Movies</strong><br/>';
-        html += '&nbsp;&nbsp;Total: ' + (result.TotalMovies || (result.MoviesCreated + result.MoviesSkipped)) + '<br/>';
-        html += '&nbsp;&nbsp;' + result.MoviesCreated + ' added' + ((result.MoviesUpdated || 0) > 0 ? ', ' + result.MoviesUpdated + ' updated' : '') + ', ' + (result.MoviesDeleted || 0) + ' deleted<br/><br/>';
-        html += '<strong>Series</strong><br/>';
-        html += '&nbsp;&nbsp;Total: ' + (result.TotalSeries || (result.SeriesCreated + result.SeriesSkipped) || 0) + '<br/>';
-        html += '&nbsp;&nbsp;' + (result.SeriesCreated || 0) + ' added, ' + (result.SeriesDeleted || 0) + ' deleted<br/>';
-        html += '&nbsp;&nbsp;Seasons: ' + (result.TotalSeasons || (result.SeasonsCreated + result.SeasonsSkipped) || 0) + ' total';
-        html += ', ' + (result.SeasonsCreated || 0) + ' added, ' + (result.SeasonsDeleted || 0) + ' deleted<br/>';
-        html += '&nbsp;&nbsp;Episodes: ' + (result.TotalEpisodes || (result.EpisodesCreated + result.EpisodesSkipped)) + ' total';
-        html += ', ' + result.EpisodesCreated + ' added' + ((result.EpisodesUpdated || 0) > 0 ? ', ' + result.EpisodesUpdated + ' updated' : '') + ', ' + (result.EpisodesDeleted || 0) + ' deleted';
+        let html = '<strong>Derni\u00e8re synchro :</strong> ' + startTime + ' - ' + status + syncBadge;
+        html += '<br/><span style="color: #aaa;">Dur\u00e9e : ' + duration + '</span><br/><br/>';
+        html += '<strong>Films</strong><br/>';
+        html += '&nbsp;&nbsp;Total : ' + (result.TotalMovies || (result.MoviesCreated + result.MoviesSkipped)) + '<br/>';
+        html += '&nbsp;&nbsp;' + result.MoviesCreated + ' ajout\u00e9(s)' + ((result.MoviesUpdated || 0) > 0 ? ', ' + result.MoviesUpdated + ' mis \u00e0 jour' : '') + ', ' + (result.MoviesDeleted || 0) + ' supprim\u00e9(s)<br/><br/>';
+        html += '<strong>S\u00e9ries</strong><br/>';
+        html += '&nbsp;&nbsp;Total : ' + (result.TotalSeries || (result.SeriesCreated + result.SeriesSkipped) || 0) + '<br/>';
+        html += '&nbsp;&nbsp;' + (result.SeriesCreated || 0) + ' ajout\u00e9e(s), ' + (result.SeriesDeleted || 0) + ' supprim\u00e9e(s)<br/>';
+        html += '&nbsp;&nbsp;Saisons : ' + (result.TotalSeasons || (result.SeasonsCreated + result.SeasonsSkipped) || 0) + ' au total';
+        html += ', ' + (result.SeasonsCreated || 0) + ' ajout\u00e9e(s), ' + (result.SeasonsDeleted || 0) + ' supprim\u00e9e(s)<br/>';
+        html += '&nbsp;&nbsp;\u00c9pisodes : ' + (result.TotalEpisodes || (result.EpisodesCreated + result.EpisodesSkipped)) + ' au total';
+        html += ', ' + result.EpisodesCreated + ' ajout\u00e9(s)' + ((result.EpisodesUpdated || 0) > 0 ? ', ' + result.EpisodesUpdated + ' mis \u00e0 jour' : '') + ', ' + (result.EpisodesDeleted || 0) + ' supprim\u00e9(s)';
 
         if (result.Errors > 0) {
-            html += '<br/><br/><span style="color: orange;"><strong>Errors:</strong> ' + result.Errors + '</span>';
+            html += '<br/><br/><span style="color: orange;"><strong>Erreurs :</strong> ' + result.Errors + '</span>';
         }
         if (result.Error) {
-            html += '<br/><span style="color: red;"><strong>Error:</strong> ' + result.Error + '</span>';
+            html += '<br/><span style="color: red;"><strong>Erreur :</strong> ' + result.Error + '</span>';
         }
 
         infoDiv.innerHTML = html;
@@ -795,7 +801,7 @@ const XtreamLibraryConfig = {
 
             let html = '<ul style="margin: 5px 0; padding-left: 20px;">';
             failedItems.forEach(function (item) {
-                html += '<li><span style="color: orange;">' + XtreamLibraryConfig.escapeHtml(item.ItemType) + ':</span> ';
+                html += '<li><span style="color: orange;">' + XtreamLibraryConfig.escapeHtml(item.ItemType) + ' :</span> ';
                 html += XtreamLibraryConfig.escapeHtml(item.Name);
                 if (item.ErrorMessage) {
                     html += ' <span style="color: #888;">(' + XtreamLibraryConfig.escapeHtml(item.ErrorMessage) + ')</span>';
@@ -815,7 +821,7 @@ const XtreamLibraryConfig = {
         const statusSpan = document.getElementById('syncStatus');
         const self = this;
 
-        statusSpan.innerHTML = '<span style="color: orange;">Retrying failed items...</span>';
+        statusSpan.innerHTML = '<span style="color: orange;">Nouvelle tentative des \u00e9l\u00e9ments en \u00e9chec...</span>';
 
         fetch(ApiClient.getUrl('XtreamLibrary/RetryFailed'), {
             method: 'POST',
@@ -826,20 +832,20 @@ const XtreamLibraryConfig = {
             return response.json();
         }).then(function (data) {
             if (data.Success) {
-                statusSpan.innerHTML = '<span style="color: green;">Retry completed!</span>';
+                statusSpan.innerHTML = '<span style="color: green;">Nouvelle tentative termin\u00e9e !</span>';
                 self.loadSyncStatus();
             } else {
-                statusSpan.innerHTML = '<span style="color: red;">Retry failed: ' + (data.Error || 'Unknown error') + '</span>';
+                statusSpan.innerHTML = '<span style="color: red;">\u00c9chec de la tentative : ' + (data.Error || 'Erreur inconnue') + '</span>';
             }
         }).catch(function (error) {
             console.error('Retry error:', error);
-            statusSpan.innerHTML = '<span style="color: red;">Retry failed: ' + (error.message || 'Check console for details') + '</span>';
+            statusSpan.innerHTML = '<span style="color: red;">\u00c9chec de la tentative : ' + (error.message || 'V\u00e9rifiez la console pour les d\u00e9tails') + '</span>';
         });
     },
 
     loadVodCategories: function () {
         const statusSpan = document.getElementById('vodCategoryLoadStatus');
-        statusSpan.innerHTML = '<span style="color: orange;">Loading...</span>';
+        statusSpan.innerHTML = '<span style="color: orange;">Chargement...</span>';
         const self = this;
 
         fetch(ApiClient.getUrl('XtreamLibrary/Categories/Vod'), {
@@ -859,16 +865,16 @@ const XtreamLibraryConfig = {
                 self.renderFolderList('vod');
                 document.getElementById('vodMultiFolderSection').style.display = 'block';
             }
-            statusSpan.innerHTML = '<span style="color: green;">Loaded ' + self.vodCategories.length + ' categories</span>';
+            statusSpan.innerHTML = '<span style="color: green;">' + self.vodCategories.length + ' cat\u00e9gories charg\u00e9es</span>';
         }).catch(function (error) {
             console.error('Failed to load VOD categories:', error);
-            statusSpan.innerHTML = '<span style="color: red;">Failed to load. Check credentials.</span>';
+            statusSpan.innerHTML = '<span style="color: red;">\u00c9chec du chargement. V\u00e9rifiez les identifiants.</span>';
         });
     },
 
     loadSeriesCategories: function () {
         const statusSpan = document.getElementById('seriesCategoryLoadStatus');
-        statusSpan.innerHTML = '<span style="color: orange;">Loading...</span>';
+        statusSpan.innerHTML = '<span style="color: orange;">Chargement...</span>';
         const self = this;
 
         fetch(ApiClient.getUrl('XtreamLibrary/Categories/Series'), {
@@ -888,10 +894,10 @@ const XtreamLibraryConfig = {
                 self.renderFolderList('series');
                 document.getElementById('seriesMultiFolderSection').style.display = 'block';
             }
-            statusSpan.innerHTML = '<span style="color: green;">Loaded ' + self.seriesCategories.length + ' categories</span>';
+            statusSpan.innerHTML = '<span style="color: green;">' + self.seriesCategories.length + ' cat\u00e9gories charg\u00e9es</span>';
         }).catch(function (error) {
             console.error('Failed to load Series categories:', error);
-            statusSpan.innerHTML = '<span style="color: red;">Failed to load. Check credentials.</span>';
+            statusSpan.innerHTML = '<span style="color: red;">\u00c9chec du chargement. V\u00e9rifiez les identifiants.</span>';
         });
     },
 
@@ -907,7 +913,7 @@ const XtreamLibraryConfig = {
         const container = document.getElementById(listId);
 
         if (!categories || categories.length === 0) {
-            container.innerHTML = '<div class="fieldDescription">No categories found.</div>';
+            container.innerHTML = '<div class="fieldDescription">Aucune cat\u00e9gorie trouv\u00e9e.</div>';
             return;
         }
 
@@ -998,7 +1004,7 @@ const XtreamLibraryConfig = {
 
     testDispatcharr: function () {
         const statusSpan = document.getElementById('dispatcharrStatus');
-        statusSpan.innerHTML = '<span style="color: orange;">Testing...</span>';
+        statusSpan.innerHTML = '<span style="color: orange;">Test en cours...</span>';
 
         fetch(ApiClient.getUrl('XtreamLibrary/TestDispatcharr'), {
             method: 'POST',
@@ -1015,13 +1021,13 @@ const XtreamLibraryConfig = {
                 statusSpan.innerHTML = '<span style="color: #ff6b6b;">' + result.Message + '</span>';
             }
         }).catch(function (err) {
-            statusSpan.innerHTML = '<span style="color: #ff6b6b;">Error: ' + err.message + '</span>';
+            statusSpan.innerHTML = '<span style="color: #ff6b6b;">Erreur : ' + err.message + '</span>';
         });
     },
 
     clearMetadataCache: function () {
         const statusSpan = document.getElementById('metadataCacheStatus');
-        statusSpan.innerHTML = '<span style="color: orange;">Clearing...</span>';
+        statusSpan.innerHTML = '<span style="color: orange;">Vidage en cours...</span>';
 
         fetch(ApiClient.getUrl('XtreamLibrary/ClearMetadataCache'), {
             method: 'POST',
@@ -1034,16 +1040,16 @@ const XtreamLibraryConfig = {
             if (data.Success) {
                 statusSpan.innerHTML = '<span style="color: green;">' + data.Message + '</span>';
             } else {
-                statusSpan.innerHTML = '<span style="color: red;">Failed to clear cache.</span>';
+                statusSpan.innerHTML = '<span style="color: red;">\u00c9chec du vidage du cache.</span>';
             }
         }).catch(function (error) {
             console.error('ClearMetadataCache error:', error);
-            statusSpan.innerHTML = '<span style="color: red;">Failed: ' + (error.message || 'Check console for details') + '</span>';
+            statusSpan.innerHTML = '<span style="color: red;">\u00c9chec : ' + (error.message || 'V\u00e9rifiez la console pour les d\u00e9tails') + '</span>';
         });
     },
 
     cleanMovies: function () {
-        if (!confirm('Are you sure you want to delete ALL Movies content?\n\nThis action cannot be undone.')) {
+        if (!confirm('\u00cates-vous s\u00fbr de vouloir supprimer TOUT le contenu Films ?\n\nCette action est irr\u00e9versible.')) {
             return;
         }
 
@@ -1051,7 +1057,7 @@ const XtreamLibraryConfig = {
     },
 
     cleanSeries: function () {
-        if (!confirm('Are you sure you want to delete ALL Series content?\n\nThis action cannot be undone.')) {
+        if (!confirm('\u00cates-vous s\u00fbr de vouloir supprimer TOUT le contenu S\u00e9ries ?\n\nCette action est irr\u00e9versible.')) {
             return;
         }
 
@@ -1060,7 +1066,7 @@ const XtreamLibraryConfig = {
 
     cleanLibraryFolder: function (endpoint) {
         const statusDiv = document.getElementById('cleanLibrariesStatus');
-        statusDiv.innerHTML = '<span style="color: orange;">Deleting...</span>';
+        statusDiv.innerHTML = '<span style="color: orange;">Suppression en cours...</span>';
 
         fetch(ApiClient.getUrl('XtreamLibrary/' + endpoint), {
             method: 'POST',
@@ -1073,18 +1079,18 @@ const XtreamLibraryConfig = {
             if (data.Success) {
                 statusDiv.innerHTML = '<span style="color: green;">' + data.Message + '</span>';
             } else {
-                statusDiv.innerHTML = '<span style="color: red;">' + (data.Message || 'Failed to clean library.') + '</span>';
+                statusDiv.innerHTML = '<span style="color: red;">' + (data.Message || '\u00c9chec du nettoyage de la biblioth\u00e8que.') + '</span>';
             }
         }).catch(function (error) {
             console.error('Clean library error:', error);
-            statusDiv.innerHTML = '<span style="color: red;">Failed: ' + (error.message || 'Check console for details') + '</span>';
+            statusDiv.innerHTML = '<span style="color: red;">\u00c9chec : ' + (error.message || 'V\u00e9rifiez la console pour les d\u00e9tails') + '</span>';
         });
     },
 
     // Live TV functions
     loadLiveCategories: function () {
         const statusSpan = document.getElementById('liveCategoryLoadStatus');
-        statusSpan.innerHTML = '<span style="color: orange;">Loading...</span>';
+        statusSpan.innerHTML = '<span style="color: orange;">Chargement...</span>';
         const self = this;
 
         fetch(ApiClient.getUrl('XtreamLibrary/Categories/Live'), {
@@ -1098,10 +1104,10 @@ const XtreamLibraryConfig = {
             self.liveCategories = categories || [];
             self.renderCategoryList('live', self.liveCategories, self.selectedLiveCategoryIds);
             document.getElementById('liveSingleFolderSection').style.display = 'block';
-            statusSpan.innerHTML = '<span style="color: green;">Loaded ' + self.liveCategories.length + ' categories</span>';
+            statusSpan.innerHTML = '<span style="color: green;">' + self.liveCategories.length + ' cat\u00e9gories charg\u00e9es</span>';
         }).catch(function (error) {
             console.error('Failed to load Live TV categories:', error);
-            statusSpan.innerHTML = '<span style="color: red;">Failed to load. Check credentials.</span>';
+            statusSpan.innerHTML = '<span style="color: red;">\u00c9chec du chargement. V\u00e9rifiez les identifiants.</span>';
         });
     },
 
@@ -1186,20 +1192,20 @@ const XtreamLibraryConfig = {
         if (!container) return;
 
         if (!lastSync) {
-            container.innerHTML = '<span style="opacity: 0.5;">No sync has been performed yet.</span>';
+            container.innerHTML = '<span style="opacity: 0.5;">Aucune synchronisation effectu\u00e9e pour le moment.</span>';
             return;
         }
 
         var statusBadge = lastSync.Success
-            ? '<span class="status-badge status-badge-success">Success</span>'
-            : '<span class="status-badge status-badge-failed">Failed</span>';
+            ? '<span class="status-badge status-badge-success">Succ\u00e8s</span>'
+            : '<span class="status-badge status-badge-failed">\u00c9chec</span>';
 
         var typeBadge = lastSync.WasIncrementalSync
-            ? '<span class="status-badge status-badge-incremental">Incremental</span>'
-            : '<span class="status-badge status-badge-full">Full Sync</span>';
+            ? '<span class="status-badge status-badge-incremental">Incr\u00e9mentale</span>'
+            : '<span class="status-badge status-badge-full">Compl\u00e8te</span>';
 
         if (progress && progress.IsRunning) {
-            statusBadge = '<span class="status-badge status-badge-running">Running</span>';
+            statusBadge = '<span class="status-badge status-badge-running">En cours</span>';
         }
 
         var duration = this.formatDuration(lastSync.StartTime, lastSync.EndTime);
@@ -1210,14 +1216,14 @@ const XtreamLibraryConfig = {
 
         // Stat counters
         html += '<div>';
-        html += this.renderStatBadge(lastSync.TotalMovies || (lastSync.MoviesCreated + lastSync.MoviesSkipped), 'Movies');
-        html += this.renderStatBadge(lastSync.TotalSeries || (lastSync.SeriesCreated + (lastSync.SeriesSkipped || 0)), 'Series');
-        html += this.renderStatBadge(lastSync.TotalEpisodes || (lastSync.EpisodesCreated + lastSync.EpisodesSkipped), 'Episodes');
-        html += this.renderStatBadge(lastSync.MoviesCreated + (lastSync.SeriesCreated || 0) + lastSync.EpisodesCreated, 'Created');
+        html += this.renderStatBadge(lastSync.TotalMovies || (lastSync.MoviesCreated + lastSync.MoviesSkipped), 'Films');
+        html += this.renderStatBadge(lastSync.TotalSeries || (lastSync.SeriesCreated + (lastSync.SeriesSkipped || 0)), 'S\u00e9ries');
+        html += this.renderStatBadge(lastSync.TotalEpisodes || (lastSync.EpisodesCreated + lastSync.EpisodesSkipped), '\u00c9pisodes');
+        html += this.renderStatBadge(lastSync.MoviesCreated + (lastSync.SeriesCreated || 0) + lastSync.EpisodesCreated, 'Cr\u00e9\u00e9s');
         if (lastSync.Errors > 0) {
             html += '<div class="dashboard-stat" style="border: 1px solid rgba(255,100,100,0.3);">';
             html += '<span class="stat-value" style="color: #e08282;">' + lastSync.Errors + '</span>';
-            html += '<span class="stat-label">Errors</span></div>';
+            html += '<span class="stat-label">Erreurs</span></div>';
         }
         html += '</div>';
 
@@ -1232,12 +1238,12 @@ const XtreamLibraryConfig = {
         var container = document.getElementById('dashboardSchedule');
         if (!container) return;
 
-        var html = '<div style="margin-bottom: 8px;"><strong>Type:</strong> ' + this.escapeHtml(data.ScheduleType) + '</div>';
+        var html = '<div style="margin-bottom: 8px;"><strong>Type :</strong> ' + this.escapeHtml(data.ScheduleType) + '</div>';
         if (data.NextSyncTime) {
-            html += '<div><strong>Next sync:</strong> ' + this.escapeHtml(data.NextSyncDisplay);
+            html += '<div><strong>Prochaine synchro :</strong> ' + this.escapeHtml(data.NextSyncDisplay);
             html += '<br/><span style="opacity: 0.5; font-size: 0.9em;">' + new Date(data.NextSyncTime).toLocaleString() + '</span></div>';
         } else {
-            html += '<div style="opacity: 0.5;">Next sync time unavailable (no previous sync)</div>';
+            html += '<div style="opacity: 0.5;">Prochaine synchro indisponible (aucune synchronisation pr\u00e9c\u00e9dente)</div>';
         }
 
         container.innerHTML = html;
@@ -1248,7 +1254,7 @@ const XtreamLibraryConfig = {
         if (!container) return;
 
         if (!stats || (stats.TotalMovieFolders === 0 && stats.TotalSeriesFolders === 0)) {
-            container.innerHTML = '<span style="opacity: 0.5;">No library content found. Run a sync first.</span>';
+            container.innerHTML = '<span style="opacity: 0.5;">Aucun contenu trouv\u00e9 dans la biblioth\u00e8que. Lancez d\'abord une synchronisation.</span>';
             return;
         }
 
@@ -1257,24 +1263,24 @@ const XtreamLibraryConfig = {
         if (stats.TotalMovieFolders > 0) {
             var moviePct = Math.round((stats.MatchedMovies / stats.TotalMovieFolders) * 100);
             html += '<div class="library-stat-bar">';
-            html += '<span style="width: 80px;">Movies</span>';
+            html += '<span style="width: 80px;">Films</span>';
             html += '<div class="bar-container"><div class="bar-fill" style="width: ' + moviePct + '%;"></div></div>';
             html += '<span style="width: 120px; text-align: right;">' + stats.MatchedMovies + ' / ' + stats.TotalMovieFolders + ' (' + moviePct + '%)</span>';
             html += '</div>';
             if (stats.UnmatchedMovies > 0) {
-                html += '<div style="opacity: 0.5; font-size: 0.85em; margin-left: 80px;">' + stats.UnmatchedMovies + ' unmatched</div>';
+                html += '<div style="opacity: 0.5; font-size: 0.85em; margin-left: 80px;">' + stats.UnmatchedMovies + ' non identifi\u00e9(s)</div>';
             }
         }
 
         if (stats.TotalSeriesFolders > 0) {
             var seriesPct = Math.round((stats.MatchedSeries / stats.TotalSeriesFolders) * 100);
             html += '<div class="library-stat-bar" style="margin-top: 8px;">';
-            html += '<span style="width: 80px;">Series</span>';
+            html += '<span style="width: 80px;">S\u00e9ries</span>';
             html += '<div class="bar-container"><div class="bar-fill" style="width: ' + seriesPct + '%;"></div></div>';
             html += '<span style="width: 120px; text-align: right;">' + stats.MatchedSeries + ' / ' + stats.TotalSeriesFolders + ' (' + seriesPct + '%)</span>';
             html += '</div>';
             if (stats.UnmatchedSeries > 0) {
-                html += '<div style="opacity: 0.5; font-size: 0.85em; margin-left: 80px;">' + stats.UnmatchedSeries + ' unmatched</div>';
+                html += '<div style="opacity: 0.5; font-size: 0.85em; margin-left: 80px;">' + stats.UnmatchedSeries + ' non identifi\u00e9e(s)</div>';
             }
         }
 
@@ -1286,13 +1292,13 @@ const XtreamLibraryConfig = {
         if (!container) return;
 
         if (!history || history.length === 0) {
-            container.innerHTML = '<span style="opacity: 0.5;">No sync history yet.</span>';
+            container.innerHTML = '<span style="opacity: 0.5;">Aucun historique de synchronisation.</span>';
             return;
         }
 
         var self = this;
         var html = '<table class="dashboard-history-table">';
-        html += '<thead><tr><th>Time</th><th>Status</th><th>Type</th><th>Duration</th><th></th><th>Added</th><th>Deleted</th><th>Errors</th></tr></thead>';
+        html += '<thead><tr><th>Date</th><th>Statut</th><th>Type</th><th>Dur\u00e9e</th><th></th><th>Ajout\u00e9s</th><th>Supprim\u00e9s</th><th>Erreurs</th></tr></thead>';
         html += '<tbody>';
 
         var colorNum = function (val, color) {
@@ -1303,8 +1309,8 @@ const XtreamLibraryConfig = {
             var time = new Date(entry.StartTime).toLocaleString();
             var statusBadge = entry.Success
                 ? '<span class="status-badge status-badge-success">OK</span>'
-                : '<span class="status-badge status-badge-failed">Fail</span>';
-            var typeBadge = entry.WasIncrementalSync ? 'Incr' : 'Full';
+                : '<span class="status-badge status-badge-failed">\u00c9chec</span>';
+            var typeBadge = entry.WasIncrementalSync ? 'Incr.' : 'Compl.';
             var duration = self.formatDuration(entry.StartTime, entry.EndTime);
             var errors = entry.Errors || 0;
 
@@ -1314,7 +1320,7 @@ const XtreamLibraryConfig = {
             html += '<td rowspan="2" style="vertical-align: middle;">' + statusBadge + '</td>';
             html += '<td rowspan="2" style="vertical-align: middle;">' + typeBadge + '</td>';
             html += '<td rowspan="2" style="vertical-align: middle;">' + duration + '</td>';
-            html += '<td style="opacity: 0.6; font-size: 0.85em;">Movies</td>';
+            html += '<td style="opacity: 0.6; font-size: 0.85em;">Films</td>';
             html += '<td>' + colorNum(entry.MoviesCreated || 0, '#82e0aa') + '</td>';
             html += '<td>' + colorNum(entry.MoviesDeleted || 0, '#e0c882') + '</td>';
             html += '<td rowspan="2" style="vertical-align: middle;">' + colorNum(errors, '#e08282') + '</td>';
@@ -1322,7 +1328,7 @@ const XtreamLibraryConfig = {
 
             // Series row
             html += '<tr>';
-            html += '<td style="opacity: 0.6; font-size: 0.85em;">Series</td>';
+            html += '<td style="opacity: 0.6; font-size: 0.85em;">S\u00e9ries</td>';
             html += '<td>' + colorNum((entry.SeriesCreated || 0) + (entry.EpisodesCreated || 0), '#82e0aa') + '</td>';
             html += '<td>' + colorNum((entry.SeriesDeleted || 0) + (entry.EpisodesDeleted || 0), '#e0c882') + '</td>';
             html += '</tr>';
@@ -1365,10 +1371,10 @@ const XtreamLibraryConfig = {
         // Details
         var details = [];
         if (progress.TotalCategories > 0) {
-            details.push('Batches: ' + progress.CategoriesProcessed + '/' + progress.TotalCategories);
+            details.push('Lots : ' + progress.CategoriesProcessed + '/' + progress.TotalCategories);
         }
         if (progress.TotalItems > 0) {
-            details.push('Items: ' + progress.ItemsProcessed + '/' + progress.TotalItems + ' (' + percentage + '%)');
+            details.push('\u00c9l\u00e9ments : ' + progress.ItemsProcessed + '/' + progress.TotalItems + ' (' + percentage + '%)');
         }
         if (progress.CurrentItem) {
             details.push(this.escapeHtml(progress.CurrentItem));
@@ -1379,10 +1385,10 @@ const XtreamLibraryConfig = {
 
         // Live counters
         var counters = [];
-        if (progress.MoviesCreated > 0) counters.push(progress.MoviesCreated + ' movies created');
-        if ((progress.MoviesUpdated || 0) > 0) counters.push(progress.MoviesUpdated + ' movies updated');
-        if (progress.EpisodesCreated > 0) counters.push(progress.EpisodesCreated + ' episodes created');
-        if ((progress.EpisodesUpdated || 0) > 0) counters.push(progress.EpisodesUpdated + ' episodes updated');
+        if (progress.MoviesCreated > 0) counters.push(progress.MoviesCreated + ' films cr\u00e9\u00e9s');
+        if ((progress.MoviesUpdated || 0) > 0) counters.push(progress.MoviesUpdated + ' films mis \u00e0 jour');
+        if (progress.EpisodesCreated > 0) counters.push(progress.EpisodesCreated + ' \u00e9pisodes cr\u00e9\u00e9s');
+        if ((progress.EpisodesUpdated || 0) > 0) counters.push(progress.EpisodesUpdated + ' \u00e9pisodes mis \u00e0 jour');
         if (counters.length > 0) {
             html += '<div style="margin-top: 6px; color: #82e0aa; font-size: 0.9em;">' + counters.join(' &middot; ') + '</div>';
         }
@@ -1434,10 +1440,10 @@ const XtreamLibraryConfig = {
         var btn = document.getElementById('btnDashboardSync');
         if (!btn) return;
         if (isRunning) {
-            btn.querySelector('span').textContent = 'Cancel Sync';
+            btn.querySelector('span').textContent = 'Annuler la synchro';
             btn.style.background = '#c0392b';
         } else {
-            btn.querySelector('span').textContent = 'Run Sync Now';
+            btn.querySelector('span').textContent = 'Lancer la synchro';
             btn.style.background = '';
         }
     },
@@ -1448,8 +1454,8 @@ const XtreamLibraryConfig = {
 
         // Check if sync is running (button shows "Cancel")
         var btn = document.getElementById('btnDashboardSync');
-        if (btn && btn.querySelector('span').textContent === 'Cancel Sync') {
-            if (actionSpan) actionSpan.innerHTML = '<span style="color: orange;">Cancelling...</span>';
+        if (btn && btn.querySelector('span').textContent === 'Annuler la synchro') {
+            if (actionSpan) actionSpan.innerHTML = '<span style="color: orange;">Annulation en cours...</span>';
             fetch(ApiClient.getUrl('XtreamLibrary/Cancel'), {
                 method: 'POST',
                 headers: { 'Authorization': 'MediaBrowser Token=' + ApiClient.accessToken() }
@@ -1459,7 +1465,7 @@ const XtreamLibraryConfig = {
             return;
         }
 
-        if (actionSpan) actionSpan.innerHTML = '<span style="color: orange;">Starting sync...</span>';
+        if (actionSpan) actionSpan.innerHTML = '<span style="color: orange;">D\u00e9marrage de la synchro...</span>';
         self.updateDashboardSyncButton(true);
 
         fetch(ApiClient.getUrl('XtreamLibrary/Sync'), {
@@ -1467,51 +1473,51 @@ const XtreamLibraryConfig = {
             headers: { 'Authorization': 'MediaBrowser Token=' + ApiClient.accessToken() }
         }).then(function (r) { return r.json(); }).then(function (data) {
             if (data.Success || (data.Message && data.Message.includes('already in progress'))) {
-                if (actionSpan) actionSpan.innerHTML = '<span style="color: orange;">Sync in progress...</span>';
+                if (actionSpan) actionSpan.innerHTML = '<span style="color: orange;">Synchronisation en cours...</span>';
                 self.startDashboardProgressPolling();
                 // Also update the General tab sync button state
                 self.isSyncing = true;
                 var syncBtn = document.getElementById('btnManualSync');
                 if (syncBtn) {
-                    syncBtn.querySelector('span').textContent = 'Cancel Sync';
+                    syncBtn.querySelector('span').textContent = 'Annuler la synchro';
                     syncBtn.style.background = '#c0392b';
                 }
                 self.startProgressPolling();
                 self.pollForCompletion();
             } else {
                 self.updateDashboardSyncButton(false);
-                if (actionSpan) actionSpan.innerHTML = '<span style="color: red;">' + (data.Message || 'Failed') + '</span>';
+                if (actionSpan) actionSpan.innerHTML = '<span style="color: red;">' + (data.Message || '\u00c9chec') + '</span>';
             }
         }).catch(function (err) {
             self.updateDashboardSyncButton(false);
-            if (actionSpan) actionSpan.innerHTML = '<span style="color: red;">Failed: ' + (err.message || 'Error') + '</span>';
+            if (actionSpan) actionSpan.innerHTML = '<span style="color: red;">\u00c9chec : ' + (err.message || 'Erreur') + '</span>';
         });
     },
 
     dashboardRetryFailed: function () {
         var self = this;
         var actionSpan = document.getElementById('dashboardSyncAction');
-        if (actionSpan) actionSpan.innerHTML = '<span style="color: orange;">Retrying failed items...</span>';
+        if (actionSpan) actionSpan.innerHTML = '<span style="color: orange;">Nouvelle tentative des \u00e9l\u00e9ments en \u00e9chec...</span>';
 
         fetch(ApiClient.getUrl('XtreamLibrary/RetryFailed'), {
             method: 'POST',
             headers: { 'Authorization': 'MediaBrowser Token=' + ApiClient.accessToken() }
         }).then(function (r) { return r.json(); }).then(function (data) {
             if (data.Success) {
-                if (actionSpan) actionSpan.innerHTML = '<span style="color: green;">Retry completed!</span>';
+                if (actionSpan) actionSpan.innerHTML = '<span style="color: green;">Nouvelle tentative termin\u00e9e !</span>';
             } else {
-                if (actionSpan) actionSpan.innerHTML = '<span style="color: red;">Retry failed: ' + (data.Error || 'Unknown') + '</span>';
+                if (actionSpan) actionSpan.innerHTML = '<span style="color: red;">\u00c9chec de la tentative : ' + (data.Error || 'Inconnu') + '</span>';
             }
             self.loadDashboard();
             self.loadSyncStatus();
         }).catch(function (err) {
-            if (actionSpan) actionSpan.innerHTML = '<span style="color: red;">Retry failed: ' + (err.message || 'Error') + '</span>';
+            if (actionSpan) actionSpan.innerHTML = '<span style="color: red;">\u00c9chec de la tentative : ' + (err.message || 'Erreur') + '</span>';
         });
     },
 
     downloadLog: function () {
         var statusSpan = document.getElementById('downloadLogStatus');
-        statusSpan.innerHTML = '<span style="color: orange;">Preparing...</span>';
+        statusSpan.innerHTML = '<span style="color: orange;">Pr\u00e9paration...</span>';
 
         fetch(ApiClient.getUrl('XtreamLibrary/DownloadLog'), {
             method: 'GET',
@@ -1532,16 +1538,16 @@ const XtreamLibraryConfig = {
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            statusSpan.innerHTML = '<span style="color: green;">Downloaded!</span>';
+            statusSpan.innerHTML = '<span style="color: green;">T\u00e9l\u00e9charg\u00e9 !</span>';
         }).catch(function (error) {
             console.error('DownloadLog error:', error);
-            statusSpan.innerHTML = '<span style="color: red;">Failed: ' + (error.message || 'Check console') + '</span>';
+            statusSpan.innerHTML = '<span style="color: red;">\u00c9chec : ' + (error.message || 'V\u00e9rifiez la console') + '</span>';
         });
     },
 
     refreshLiveTvCache: function () {
         const statusSpan = document.getElementById('liveTvCacheStatus');
-        statusSpan.innerHTML = '<span style="color: orange;">Refreshing...</span>';
+        statusSpan.innerHTML = '<span style="color: orange;">Actualisation...</span>';
 
         fetch(ApiClient.getUrl('XtreamLibrary/LiveTv/RefreshCache'), {
             method: 'POST',
@@ -1554,11 +1560,11 @@ const XtreamLibraryConfig = {
             if (data.Success) {
                 statusSpan.innerHTML = '<span style="color: green;">' + data.Message + '</span>';
             } else {
-                statusSpan.innerHTML = '<span style="color: red;">Failed to refresh cache.</span>';
+                statusSpan.innerHTML = '<span style="color: red;">\u00c9chec de l\'actualisation du cache.</span>';
             }
         }).catch(function (error) {
             console.error('RefreshLiveTvCache error:', error);
-            statusSpan.innerHTML = '<span style="color: red;">Failed: ' + (error.message || 'Check console for details') + '</span>';
+            statusSpan.innerHTML = '<span style="color: red;">\u00c9chec : ' + (error.message || 'V\u00e9rifiez la console pour les d\u00e9tails') + '</span>';
         });
     }
 };

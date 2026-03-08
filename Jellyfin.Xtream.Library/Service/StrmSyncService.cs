@@ -27,6 +27,8 @@ using Jellyfin.Xtream.Library.Client.Models;
 using Jellyfin.Xtream.Library.Service.Models;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Providers;
+using MediaBrowser.Model.IO;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
@@ -45,6 +47,8 @@ public partial class StrmSyncService
     private readonly IXtreamClient _client;
     private readonly IDispatcharrClient _dispatcharrClient;
     private readonly ILibraryManager _libraryManager;
+    private readonly IProviderManager _providerManager;
+    private readonly IFileSystem _fileSystem;
     private readonly IMetadataLookupService _metadataLookup;
     private readonly SnapshotService _snapshotService;
     private readonly DeltaCalculator _deltaCalculator;
@@ -63,6 +67,8 @@ public partial class StrmSyncService
     /// <param name="client">The Xtream API client.</param>
     /// <param name="dispatcharrClient">The Dispatcharr REST API client.</param>
     /// <param name="libraryManager">The Jellyfin library manager.</param>
+    /// <param name="providerManager">The Jellyfin provider manager for queuing metadata refreshes.</param>
+    /// <param name="fileSystem">The file system abstraction.</param>
     /// <param name="metadataLookup">The metadata lookup service.</param>
     /// <param name="snapshotService">The snapshot persistence service.</param>
     /// <param name="deltaCalculator">The delta calculator for incremental sync.</param>
@@ -72,6 +78,8 @@ public partial class StrmSyncService
         IXtreamClient client,
         IDispatcharrClient dispatcharrClient,
         ILibraryManager libraryManager,
+        IProviderManager providerManager,
+        IFileSystem fileSystem,
         IMetadataLookupService metadataLookup,
         SnapshotService snapshotService,
         DeltaCalculator deltaCalculator,
@@ -81,6 +89,8 @@ public partial class StrmSyncService
         _client = client;
         _dispatcharrClient = dispatcharrClient;
         _libraryManager = libraryManager;
+        _providerManager = providerManager;
+        _fileSystem = fileSystem;
         _metadataLookup = metadataLookup;
         _snapshotService = snapshotService;
         _deltaCalculator = deltaCalculator;
@@ -679,6 +689,7 @@ public partial class StrmSyncService
             }
 
             var syncedFiles = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+            var nfoUpdatedPaths = new ConcurrentBag<string>();
 
             // Sync Movies and Series - run concurrently when parallelism > 1,
             // sequentially when parallelism <= 1 to respect strict rate limits
@@ -701,6 +712,7 @@ public partial class StrmSyncService
                                 result,
                                 previousSnapshot,
                                 allCollectedMovies,
+                                nfoUpdatedPaths,
                                 linkedToken).ConfigureAwait(false);
                         },
                         linkedToken));
@@ -721,6 +733,7 @@ public partial class StrmSyncService
                                 hintSnapshot,
                                 allCollectedSeries,
                                 allSeriesInfoDict,
+                                nfoUpdatedPaths,
                                 linkedToken).ConfigureAwait(false);
                         },
                         linkedToken));
@@ -741,6 +754,7 @@ public partial class StrmSyncService
                         result,
                         previousSnapshot,
                         allCollectedMovies,
+                        nfoUpdatedPaths,
                         linkedToken).ConfigureAwait(false);
                 }
 
@@ -756,6 +770,7 @@ public partial class StrmSyncService
                         hintSnapshot,
                         allCollectedSeries,
                         allSeriesInfoDict,
+                        nfoUpdatedPaths,
                         linkedToken).ConfigureAwait(false);
                 }
             }
@@ -887,6 +902,33 @@ public partial class StrmSyncService
             if (config.EnableMetadataLookup)
             {
                 await _metadataLookup.FlushCacheAsync().ConfigureAwait(false);
+            }
+
+            // Queue targeted metadata refresh for items whose NFOs were updated with media info
+            if (!nfoUpdatedPaths.IsEmpty)
+            {
+                int refreshQueued = 0;
+                foreach (var itemPath in nfoUpdatedPaths)
+                {
+                    var item = _libraryManager.FindByPath(itemPath, Directory.Exists(itemPath));
+                    if (item != null)
+                    {
+                        _providerManager.QueueRefresh(
+                            item.Id,
+                            new MetadataRefreshOptions(new DirectoryService(_fileSystem))
+                            {
+                                MetadataRefreshMode = MetadataRefreshMode.Default,
+                                ImageRefreshMode = MetadataRefreshMode.None,
+                            },
+                            RefreshPriority.Low);
+                        refreshQueued++;
+                    }
+                }
+
+                if (refreshQueued > 0)
+                {
+                    _logger.LogInformation("Queued metadata refresh for {Count} items with updated NFO media info", refreshQueued);
+                }
             }
 
             // Trigger library scan if enabled (off by default - file monitor handles changes automatically)
@@ -1039,6 +1081,7 @@ public partial class StrmSyncService
         SyncResult result,
         ContentSnapshot? previousSnapshot,
         ConcurrentBag<StreamInfo> allCollectedMovies,
+        ConcurrentBag<string> nfoUpdatedPaths,
         CancellationToken cancellationToken)
     {
         var config = Plugin.Instance.Configuration;
@@ -1267,8 +1310,16 @@ public partial class StrmSyncService
                 }).ToList();
 
                 // Track existing STRM paths for unchanged movies (orphan protection)
+                // Also collect movies whose NFOs need media info completion
+                var nfoIncompleteMovies = new List<(StreamInfo Stream, string MovieFolder, string FolderName, string BaseName)>();
                 foreach (var m in unchangedMovies)
                 {
+                    // Skip excluded language content (let orphan cleanup remove existing folders)
+                    if (IsExcludedByLanguage(m.Stream.Name, config.ExcludedLanguageTags))
+                    {
+                        continue;
+                    }
+
                     string movieName = SanitizeFileName(m.Stream.Name, config.CustomTitleRemoveTerms);
                     int? year = ExtractYear(m.Stream.Name);
                     string baseName = year.HasValue ? $"{movieName} ({year})" : movieName;
@@ -1290,6 +1341,7 @@ public partial class StrmSyncService
                         targetFolders.Add(string.Empty);
                     }
 
+                    bool firstFolder = true;
                     foreach (var targetFolder in targetFolders)
                     {
                         if (existingMovieFolders.TryGetValue(targetFolder, out var folderCache) &&
@@ -1305,9 +1357,84 @@ public partial class StrmSyncService
                                 {
                                     syncedFiles.TryAdd(strmFile, 0);
                                 }
+
+                                // Check if NFO needs media info (only first folder per movie)
+                                if (enableProactiveMediaInfo && firstFolder)
+                                {
+                                    var nfoPath = Path.Combine(movieFolder, $"{existingFolderName}.nfo");
+                                    if (!NfoWriter.NfoHasMediaInfo(nfoPath))
+                                    {
+                                        nfoIncompleteMovies.Add((m.Stream, movieFolder, existingFolderName, baseName));
+                                    }
+                                }
                             }
                         }
+
+                        firstFolder = false;
                     }
+                }
+
+                // Complete NFOs for unchanged movies that are missing media info
+                if (nfoIncompleteMovies.Count > 0)
+                {
+                    _logger.LogInformation("Found {Count} unchanged movies with incomplete NFOs, fetching media info...", nfoIncompleteMovies.Count);
+                    int nfoProcessed = 0;
+                    int nfoFailed = 0;
+                    foreach (var (stream, movieFolder, folderName, baseName) in nfoIncompleteMovies)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        try
+                        {
+                            var vodInfo = await _client.GetVodInfoAsync(connectionInfo, stream.StreamId, cancellationToken).ConfigureAwait(false);
+                            int? providerTmdbId = null;
+                            if (!string.IsNullOrEmpty(vodInfo?.Info?.TmdbId) && int.TryParse(vodInfo.Info.TmdbId, out int tmdbParsed))
+                            {
+                                providerTmdbId = tmdbParsed;
+                            }
+
+                            int? effectiveTmdbId = tmdbOverrides.TryGetValue(baseName, out int overrideTmdbId)
+                                ? overrideTmdbId
+                                : providerTmdbId;
+                            int? year = ExtractYear(stream.Name);
+                            string movieName = SanitizeFileName(stream.Name, config.CustomTitleRemoveTerms);
+                            var nfoPath = Path.Combine(movieFolder, $"{folderName}.nfo");
+                            var written = await NfoWriter.WriteMovieNfoAsync(
+                                nfoPath,
+                                movieName,
+                                vodInfo?.Info?.Video,
+                                vodInfo?.Info?.Audio,
+                                vodInfo?.Info?.DurationSecs,
+                                effectiveTmdbId,
+                                year,
+                                cancellationToken).ConfigureAwait(false);
+                            if (written)
+                            {
+                                nfoUpdatedPaths.Add(movieFolder);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            nfoFailed++;
+                            _logger.LogDebug(ex, "Failed to fetch VOD info for NFO completion: {StreamId}", stream.StreamId);
+                        }
+
+                        nfoProcessed++;
+                        if (nfoProcessed % 500 == 0)
+                        {
+                            _logger.LogInformation(
+                                "NFO movie progress: {Processed}/{Total} processed, {Written} written, {Failed} failed",
+                                nfoProcessed,
+                                nfoIncompleteMovies.Count,
+                                nfoUpdatedPaths.Count,
+                                nfoFailed);
+                        }
+                    }
+
+                    _logger.LogInformation(
+                        "Completed {Count} movie NFOs with media info (processed {Total}, {Failed} API failures)",
+                        nfoUpdatedPaths.Count,
+                        nfoProcessed,
+                        nfoFailed);
                 }
 
                 var skipped = unchangedMovies.Count;
@@ -1457,6 +1584,13 @@ public partial class StrmSyncService
 
                 try
                 {
+                    // Skip content excluded by language tags (e.g., VOSTFR, VO, VFQ)
+                    if (IsExcludedByLanguage(stream.Name, config.ExcludedLanguageTags))
+                    {
+                        Interlocked.Increment(ref moviesSkipped);
+                        return;
+                    }
+
                     string movieName = SanitizeFileName(stream.Name, config.CustomTitleRemoveTerms);
                     int? year = ExtractYear(stream.Name);
                     string baseName = year.HasValue ? $"{movieName} ({year})" : movieName;
@@ -1536,10 +1670,22 @@ public partial class StrmSyncService
                         if (!providerTmdbId.HasValue && enableMetadataLookup && !tmdbOverrides.ContainsKey(baseName))
                         {
                             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                            timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+                            timeoutCts.CancelAfter(TimeSpan.FromSeconds(30));
                             try
                             {
                                 autoLookupTmdbId = await _metadataLookup.LookupMovieTmdbIdAsync(movieName, year, timeoutCts.Token).ConfigureAwait(false);
+
+                                // Fallback: try base title (before " - ") if full title failed
+                                if (!autoLookupTmdbId.HasValue && movieName.Contains(" - ", StringComparison.Ordinal))
+                                {
+                                    var baseTitle = movieName[..movieName.IndexOf(" - ", StringComparison.Ordinal)].Trim();
+                                    if (baseTitle.Length >= 3)
+                                    {
+                                        _logger.LogInformation("Retrying TMDb lookup with base title: '{BaseTitle}' (was: '{FullTitle}')", baseTitle, movieName);
+                                        autoLookupTmdbId = await _metadataLookup.LookupMovieTmdbIdAsync(baseTitle, year, timeoutCts.Token).ConfigureAwait(false);
+                                    }
+                                }
+
                                 if (!autoLookupTmdbId.HasValue)
                                 {
                                     Interlocked.Increment(ref unmatchedCount);
@@ -1634,7 +1780,9 @@ public partial class StrmSyncService
                         } // end strmEntries foreach
 
                         // Write NFO with provider ID and/or media info (only for first target folder)
-                        if (anyCreated && firstTargetFolder == targetFolder)
+                        var movieNfoPath = Path.Combine(movieFolder, $"{folderName}.nfo");
+                        bool nfoNeedsMediaInfo = enableProactiveMediaInfo && !NfoWriter.NfoHasMediaInfo(movieNfoPath);
+                        if ((anyCreated || nfoNeedsMediaInfo) && firstTargetFolder == targetFolder)
                         {
                             int? effectiveTmdbId = tmdbOverrides.TryGetValue(baseName, out int overrideTmdbId)
                                 ? overrideTmdbId
@@ -1665,9 +1813,8 @@ public partial class StrmSyncService
                                 }
                             }
 
-                            var nfoPath = Path.Combine(movieFolder, $"{folderName}.nfo");
-                            await NfoWriter.WriteMovieNfoAsync(
-                                nfoPath,
+                            var nfoWritten = await NfoWriter.WriteMovieNfoAsync(
+                                movieNfoPath,
                                 movieName,
                                 nfoVideo,
                                 nfoAudio,
@@ -1675,6 +1822,11 @@ public partial class StrmSyncService
                                 effectiveTmdbId,
                                 year,
                                 ct).ConfigureAwait(false);
+
+                            if (nfoWritten && nfoNeedsMediaInfo && !anyCreated)
+                            {
+                                nfoUpdatedPaths.Add(movieFolder);
+                            }
                         }
 
                         // Download artwork for unmatched movies (only for first target folder)
@@ -1776,6 +1928,7 @@ public partial class StrmSyncService
         ContentSnapshot? hintSnapshot,
         ConcurrentBag<Series> allCollectedSeries,
         ConcurrentDictionary<int, SeriesStreamInfo> allSeriesInfoDict,
+        ConcurrentBag<string> nfoUpdatedPaths,
         CancellationToken cancellationToken)
     {
         var config = Plugin.Instance.Configuration;
@@ -2012,8 +2165,16 @@ public partial class StrmSyncService
                 }).ToList();
 
                 // Track existing STRM paths for unchanged series (orphan protection)
+                // Also collect series whose episode NFOs need media info completion
+                var nfoIncompleteSeries = new List<(Series Series, string SeriesFolder)>();
                 foreach (var s in unchangedSeries)
                 {
+                    // Skip excluded language content (let orphan cleanup remove existing folders)
+                    if (IsExcludedByLanguage(s.Series.Name, config.ExcludedLanguageTags))
+                    {
+                        continue;
+                    }
+
                     string seriesName = SanitizeFileName(s.Series.Name, config.CustomTitleRemoveTerms);
                     int? year = ExtractYear(s.Series.Name);
                     string baseName = year.HasValue ? $"{seriesName} ({year})" : seriesName;
@@ -2035,6 +2196,7 @@ public partial class StrmSyncService
                         targetFolders.Add(string.Empty);
                     }
 
+                    bool firstFolder = true;
                     foreach (var targetFolder in targetFolders)
                     {
                         string seriesBasePath = string.IsNullOrEmpty(targetFolder)
@@ -2065,7 +2227,97 @@ public partial class StrmSyncService
                             {
                                 // Ignore filesystem errors during orphan protection scan
                             }
+
+                            // Check if any episode NFO needs media info (only first folder)
+                            if (enableProactiveMediaInfo && firstFolder)
+                            {
+                                try
+                                {
+                                    var nfoFiles = Directory.GetFiles(match.Path, "*.nfo", SearchOption.AllDirectories);
+                                    bool anyMissing = nfoFiles.Length == 0 || nfoFiles.Any(f => !NfoWriter.NfoHasMediaInfo(f));
+                                    if (anyMissing)
+                                    {
+                                        nfoIncompleteSeries.Add((s.Series, match.Path));
+                                    }
+                                }
+                                catch (Exception)
+                                {
+                                    // Ignore filesystem errors
+                                }
+                            }
                         }
+
+                        firstFolder = false;
+                    }
+                }
+
+                // Complete NFOs for unchanged series that are missing media info
+                if (nfoIncompleteSeries.Count > 0)
+                {
+                    _logger.LogInformation("Found {Count} unchanged series with incomplete NFOs, fetching media info...", nfoIncompleteSeries.Count);
+                    int seriesNfoCompleted = 0;
+                    foreach (var (series, seriesFolder) in nfoIncompleteSeries)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        try
+                        {
+                            var seriesInfo = await _client.GetSeriesStreamsBySeriesAsync(connectionInfo, series.SeriesId, cancellationToken).ConfigureAwait(false);
+                            if (seriesInfo?.Episodes == null)
+                            {
+                                continue;
+                            }
+
+                            string sName = SanitizeFileName(series.Name, config.CustomTitleRemoveTerms);
+                            foreach (var seasonEntry in seriesInfo.Episodes)
+                            {
+                                int seasonNumber = seasonEntry.Key;
+                                string seasonFolder = Path.Combine(seriesFolder, $"Season {seasonNumber}");
+                                if (!Directory.Exists(seasonFolder))
+                                {
+                                    continue;
+                                }
+
+                                foreach (var episode in seasonEntry.Value)
+                                {
+                                    if (episode.Info == null)
+                                    {
+                                        continue;
+                                    }
+
+                                    string episodeFileName = BuildEpisodeFileName(sName, seasonNumber, episode, config.CustomTitleRemoveTerms);
+                                    var nfoFileName = Path.GetFileNameWithoutExtension(episodeFileName) + ".nfo";
+                                    var nfoPath = Path.Combine(seasonFolder, nfoFileName);
+                                    if (!NfoWriter.NfoHasMediaInfo(nfoPath))
+                                    {
+                                        var written = await NfoWriter.WriteEpisodeNfoAsync(
+                                            nfoPath,
+                                            sName,
+                                            seasonNumber,
+                                            episode.EpisodeNum,
+                                            episode.Title,
+                                            episode.Info.Video,
+                                            episode.Info.Audio,
+                                            episode.Info.DurationSecs,
+                                            cancellationToken).ConfigureAwait(false);
+                                        if (written)
+                                        {
+                                            string strmPath = Path.Combine(seasonFolder, episodeFileName);
+                                            nfoUpdatedPaths.Add(strmPath);
+                                            seriesNfoCompleted++;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Failed to fetch series info for NFO completion: {SeriesId}", series.SeriesId);
+                        }
+                    }
+
+                    if (seriesNfoCompleted > 0)
+                    {
+                        _logger.LogInformation("Completed {Count} episode NFOs with media info across {Series} series", seriesNfoCompleted, nfoIncompleteSeries.Count);
                     }
                 }
 
@@ -2185,6 +2437,13 @@ public partial class StrmSyncService
 
                 try
                 {
+                    // Skip content excluded by language tags (e.g., VOSTFR, VO, VFQ)
+                    if (IsExcludedByLanguage(series.Name, config.ExcludedLanguageTags))
+                    {
+                        Interlocked.Increment(ref seriesSkipped);
+                        return;
+                    }
+
                     string seriesName = SanitizeFileName(series.Name, config.CustomTitleRemoveTerms);
                     int? year = ExtractYear(series.Name);
                     string baseName = year.HasValue ? $"{seriesName} ({year})" : seriesName;
@@ -2314,10 +2573,22 @@ public partial class StrmSyncService
                     if (!providerTmdbId.HasValue && enableMetadataLookup && !tvdbOverrides.ContainsKey(baseName))
                     {
                         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                        timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+                        timeoutCts.CancelAfter(TimeSpan.FromSeconds(30));
                         try
                         {
                             autoLookupTvdbId = await _metadataLookup.LookupSeriesTvdbIdAsync(seriesName, year, timeoutCts.Token).ConfigureAwait(false);
+
+                            // Fallback: try base title (before " - ") if full title failed
+                            if (!autoLookupTvdbId.HasValue && seriesName.Contains(" - ", StringComparison.Ordinal))
+                            {
+                                var baseTitle = seriesName[..seriesName.IndexOf(" - ", StringComparison.Ordinal)].Trim();
+                                if (baseTitle.Length >= 3)
+                                {
+                                    _logger.LogInformation("Retrying TVDb lookup with base title: '{BaseTitle}' (was: '{FullTitle}')", baseTitle, seriesName);
+                                    autoLookupTvdbId = await _metadataLookup.LookupSeriesTvdbIdAsync(baseTitle, year, timeoutCts.Token).ConfigureAwait(false);
+                                }
+                            }
+
                             if (!autoLookupTvdbId.HasValue)
                             {
                                 Interlocked.Increment(ref unmatchedCount);
@@ -2458,6 +2729,30 @@ public partial class StrmSyncService
                                 {
                                     if (StrmContentMatches(strmPath, streamUrl))
                                     {
+                                        // Check if existing NFO needs media info
+                                        if (enableProactiveMediaInfo && firstSeriesTargetFolder == targetFolder && episode.Info != null)
+                                        {
+                                            var skipNfoFileName = Path.GetFileNameWithoutExtension(episodeFileName) + ".nfo";
+                                            var skipNfoPath = Path.Combine(seasonFolder, skipNfoFileName);
+                                            if (!NfoWriter.NfoHasMediaInfo(skipNfoPath))
+                                            {
+                                                var episodeNfoWritten = await NfoWriter.WriteEpisodeNfoAsync(
+                                                    skipNfoPath,
+                                                    seriesName,
+                                                    seasonNumber,
+                                                    episode.EpisodeNum,
+                                                    episode.Title,
+                                                    episode.Info.Video,
+                                                    episode.Info.Audio,
+                                                    episode.Info.DurationSecs,
+                                                    ct).ConfigureAwait(false);
+                                                if (episodeNfoWritten)
+                                                {
+                                                    nfoUpdatedPaths.Add(strmPath);
+                                                }
+                                            }
+                                        }
+
                                         Interlocked.Increment(ref episodesSkipped);
                                         continue;
                                     }
@@ -2714,8 +3009,14 @@ public partial class StrmSyncService
             }
         }
 
+        // Remove leading pipe prefix chains like "| ", "DV| ", "+| ", "| FR | ", "DV| FR | "
+        cleanName = OrphanPipePrefixPattern().Replace(cleanName, string.Empty);
+
         // Remove prefix language tags like "┃UK┃" or "| EN |" at start of name
         cleanName = PrefixLanguageTagPattern().Replace(cleanName, string.Empty);
+
+        // Remove dash-style country code prefixes like "EN - ", "FR - ", "US - "
+        cleanName = DashPrefixPattern().Replace(cleanName, string.Empty);
 
         // Remove language/country tags like "| UK |", "┃EN┃", "[DE]", "| FR |", etc.
         cleanName = LanguageTagPattern().Replace(cleanName, string.Empty);
@@ -2757,10 +3058,13 @@ public partial class StrmSyncService
             cleanName = cleanName.Replace(c, '_');
         }
 
+        // Strip any remaining pipe prefixes left after tag removal (e.g., "| FR | 4K | Title" → "4K" removed → "| Title")
+        cleanName = OrphanPipePrefixPattern().Replace(cleanName, string.Empty);
+
         // Clean up whitespace and underscores
         cleanName = MultipleSpacesPattern().Replace(cleanName, " ");
         cleanName = MultipleUnderscoresPattern().Replace(cleanName, "_");
-        cleanName = cleanName.Trim('_', ' ', '-');
+        cleanName = cleanName.Trim('_', ' ', '-', '|', '┃');
 
         cleanName = string.IsNullOrEmpty(cleanName) ? "Unknown" : cleanName;
         return TruncatePathComponent(cleanName);
@@ -2820,6 +3124,7 @@ public partial class StrmSyncService
 
         // Strip prefix language tags first (same as SanitizeFileName step 1)
         string cleanName = PrefixLanguageTagPattern().Replace(name, string.Empty);
+        cleanName = DashPrefixPattern().Replace(cleanName, string.Empty);
 
         var labels = new List<string>();
 
@@ -2875,6 +3180,31 @@ public partial class StrmSyncService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Checks whether the original stream name contains any of the user-defined excluded language tags.
+    /// Tags are matched case-insensitively as substrings of the original name.
+    /// </summary>
+    /// <param name="originalName">The original stream name from the provider.</param>
+    /// <param name="excludedTags">Newline-separated list of tags to exclude.</param>
+    /// <returns>True if the name contains any excluded tag.</returns>
+    internal static bool IsExcludedByLanguage(string? originalName, string? excludedTags)
+    {
+        if (string.IsNullOrEmpty(originalName) || string.IsNullOrWhiteSpace(excludedTags))
+        {
+            return false;
+        }
+
+        foreach (var tag in ChannelNameCleaner.ParseUserTerms(excludedTags))
+        {
+            if (originalName.Contains(tag, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -3194,6 +3524,11 @@ public partial class StrmSyncService
     [GeneratedRegex(@"^[\|\┃]\s*[A-Z]{2,3}\s*[\|\┃]\s*", RegexOptions.IgnoreCase)]
     private static partial Regex PrefixLanguageTagPattern();
 
+    // Matches 2-letter country code dash prefix like "EN - ", "FR - ", "US - "
+    // Limited to exactly 2 uppercase letters to avoid false-positives on acronyms (FBI, CSI, NCIS)
+    [GeneratedRegex(@"^[A-Z]{2}\s+-\s+")]
+    private static partial Regex DashPrefixPattern();
+
     // Matches language tags like "| UK |", "┃US┃", "[EN]", "| DE |", "| FR |", etc.
     [GeneratedRegex(@"[\|\┃\[]\s*[A-Z]{2,3}\s*[\|\┃\]]", RegexOptions.IgnoreCase)]
     private static partial Regex LanguageTagPattern();
@@ -3201,6 +3536,11 @@ public partial class StrmSyncService
     // Matches language phrases like "(EN SPOKEN)", "(DE DUBBED)", "(OV)", "(SUB)", "[FR Audio]", "(ES-)", etc.
     [GeneratedRegex(@"[\(\[]\s*(?:EN|UK|DE|FR|ES|IT|NL|PT|RU|PL|JP|KR|CN)\s*(?:SPOKEN|DUBBED|GESPROKEN|GEPSROKEN|SUBS?|SUBBED|OV|OmU|AUDIO)?-?\s*[\)\]]", RegexOptions.IgnoreCase)]
     private static partial Regex LanguagePhrasePattern();
+
+    // Matches leading pipe prefix chains like "| ", "DV| ", "+| ", "| FR | ", "DV| FR | ", "+| EN | "
+    // Handles optional DV/+ prefix, pipe/┃ separator, and optional language code chain
+    [GeneratedRegex(@"^(?:DV|\+)?\s*[\|┃]\s*(?:[A-Z]{2,3}\s*[\|┃]\s*)*", RegexOptions.IgnoreCase)]
+    private static partial Regex OrphanPipePrefixPattern();
 
     // Matches bracketed content containing Asian characters (CJK: Chinese, Japanese, Korean)
     [GeneratedRegex(@"\s*[\[\(][^\]\)]*[\u3000-\u9FFF\uAC00-\uD7AF\u3040-\u309F\u30A0-\u30FF]+[^\]\)]*[\]\)]")]

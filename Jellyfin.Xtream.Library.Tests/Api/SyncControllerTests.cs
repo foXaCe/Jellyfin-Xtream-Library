@@ -21,6 +21,8 @@ using Jellyfin.Xtream.Library.Service;
 using Jellyfin.Xtream.Library.Tests.Helpers;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Providers;
+using MediaBrowser.Model.IO;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -54,10 +56,14 @@ public class SyncControllerTests
         var deltaCalculator = new DeltaCalculator(NullLogger<DeltaCalculator>.Instance);
 
         var mockDispatcharrClient = new Mock<IDispatcharrClient>();
+        var mockProviderManager = new Mock<IProviderManager>();
+        var mockFileSystem = new Mock<IFileSystem>();
         _syncService = new StrmSyncService(
             _mockClient.Object,
             mockDispatcharrClient.Object,
             _mockLibraryManager.Object,
+            mockProviderManager.Object,
+            mockFileSystem.Object,
             _mockMetadataLookup.Object,
             snapshotService,
             deltaCalculator,
@@ -250,10 +256,14 @@ public class SyncControllerTests
             var snapshotService = new SnapshotService(appPathsMock.Object, NullLogger<SnapshotService>.Instance);
             var deltaCalculator = new DeltaCalculator(NullLogger<DeltaCalculator>.Instance);
             var mockDispatcharrClient = new Mock<IDispatcharrClient>();
+            var mockProviderManager = new Mock<IProviderManager>();
+            var mockFileSystem = new Mock<IFileSystem>();
             var syncService = new StrmSyncService(
                 _mockClient.Object,
                 mockDispatcharrClient.Object,
                 _mockLibraryManager.Object,
+                mockProviderManager.Object,
+                mockFileSystem.Object,
                 _mockMetadataLookup.Object,
                 snapshotService,
                 deltaCalculator,

@@ -164,9 +164,9 @@ public class PluginConfigurationTests
     }
 
     [Fact]
-    public void FallbackToYearlessLookup_DefaultIsFalse()
+    public void FallbackToYearlessLookup_DefaultIsTrue()
     {
         var config = new PluginConfiguration();
-        config.FallbackToYearlessLookup.Should().BeFalse();
+        config.FallbackToYearlessLookup.Should().BeTrue();
     }
 }

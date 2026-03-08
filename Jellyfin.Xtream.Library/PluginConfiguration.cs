@@ -144,6 +144,14 @@ public class PluginConfiguration : BasePluginConfiguration
     public string CustomTitleRemoveTerms { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets language tags that cause content to be excluded from sync.
+    /// One tag per line (e.g., "VOSTFR", "VO", "VFQ").
+    /// Content whose original name contains any of these tags (in parentheses, brackets, or standalone)
+    /// will be skipped entirely and existing STRM files will be cleaned up.
+    /// </summary>
+    public string ExcludedLanguageTags { get; set; } = string.Empty;
+
+    /// <summary>
     /// Gets or sets a value indicating whether to download artwork from the provider
     /// for content that could not be matched to TMDb/TVDb.
     /// This ensures unmatched content still has posters and thumbnails.
@@ -218,7 +226,7 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Useful when the provider has incorrect years in stream names.
     /// Note: year-based false-positive protection is weaker for the fallback result.
     /// </summary>
-    public bool FallbackToYearlessLookup { get; set; } = false;
+    public bool FallbackToYearlessLookup { get; set; } = true;
 
     // =====================
     // Dispatcharr Mode Settings

@@ -1210,6 +1210,57 @@ public partial class StrmSyncService
 
             var totalFolders = existingMovieFolders.Values.Sum(d => d.Count);
             _logger.LogInformation("Found {Count} existing movie folders", totalFolders);
+
+            // Deduplication pass: remove bare movie folders when a folder with ID suffix exists
+            int movieBareDuplicatesDeleted = 0;
+            foreach (var kvp in existingMovieFolders)
+            {
+                var parentPath = string.IsNullOrEmpty(kvp.Key) ? moviesPath : Path.Combine(moviesPath, kvp.Key);
+                var toRemove = new List<string>();
+                foreach (var entry in kvp.Value)
+                {
+                    var baseKey = entry.Key;
+                    var folderName = entry.Value;
+                    // Only check bare folders (no "[" suffix)
+                    if (folderName.Contains(" [", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    // Check if a folder with ID suffix exists
+                    var prefix = folderName + " [";
+                    try
+                    {
+                        var withId = Directory.GetDirectories(parentPath)
+                            .FirstOrDefault(d => Path.GetFileName(d).StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+                        if (withId != null)
+                        {
+                            var barePath = Path.Combine(parentPath, folderName);
+                            if (Directory.Exists(barePath))
+                            {
+                                Directory.Delete(barePath, true);
+                                toRemove.Add(baseKey);
+                                movieBareDuplicatesDeleted++;
+                                _logger.LogInformation("Deleted bare movie duplicate: '{BareName}' (reusing '{IdName}')", folderName, Path.GetFileName(withId));
+                            }
+                        }
+                    }
+                    catch (IOException ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to delete bare movie duplicate '{Folder}'", folderName);
+                    }
+                }
+
+                foreach (var key in toRemove)
+                {
+                    kvp.Value.Remove(key);
+                }
+            }
+
+            if (movieBareDuplicatesDeleted > 0)
+            {
+                _logger.LogInformation("Deduplication pass: deleted {Count} bare duplicate movie folders", movieBareDuplicatesDeleted);
+            }
         }
 
         // Process categories in batches to reduce memory usage
@@ -1375,12 +1426,17 @@ public partial class StrmSyncService
                 }
 
                 // Complete NFOs for unchanged movies that are missing media info
+                // Cap at 200 per batch to avoid extremely long syncs when provider is slow
+                const int MaxMovieNfoPerBatch = 200;
                 if (nfoIncompleteMovies.Count > 0)
                 {
-                    _logger.LogInformation("Found {Count} unchanged movies with incomplete NFOs, fetching media info...", nfoIncompleteMovies.Count);
+                    var moviesToProcess = nfoIncompleteMovies.Count > MaxMovieNfoPerBatch
+                        ? nfoIncompleteMovies.Take(MaxMovieNfoPerBatch).ToList()
+                        : nfoIncompleteMovies;
+                    _logger.LogInformation("Found {Count} unchanged movies with incomplete NFOs, fetching media info for {Processing}...", nfoIncompleteMovies.Count, moviesToProcess.Count);
                     int nfoProcessed = 0;
                     int nfoFailed = 0;
-                    foreach (var (stream, movieFolder, folderName, baseName) in nfoIncompleteMovies)
+                    foreach (var (stream, movieFolder, folderName, baseName) in moviesToProcess)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         try
@@ -1766,15 +1822,23 @@ public partial class StrmSyncService
                                 }
                             }
                         }
-                        else if (!Directory.Exists(movieFolder) && Directory.Exists(movieBasePath))
+                        else if (Directory.Exists(movieBasePath))
                         {
                             try
                             {
-                                var existingWithId = Directory.GetDirectories(movieBasePath, folderName + " [*");
+                                var prefix = folderName + " [";
+                                var existingWithId = Directory.GetDirectories(movieBasePath)
+                                    .Where(d => Path.GetFileName(d).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                                    .ToArray();
                                 if (existingWithId.Length > 0)
                                 {
+                                    if (Directory.Exists(movieFolder))
+                                    {
+                                        Directory.Delete(movieFolder, true);
+                                        _logger.LogInformation("Deleted bare duplicate: '{BareName}' (reusing '{IdName}')", folderName, Path.GetFileName(existingWithId[0]));
+                                    }
+
                                     movieFolder = existingWithId[0];
-                                    _logger.LogDebug("Reusing existing ID folder: '{FolderName}'", Path.GetFileName(existingWithId[0]));
                                 }
                             }
                             catch (IOException)
@@ -2101,6 +2165,50 @@ public partial class StrmSyncService
             }
 
             _logger.LogInformation("Found {Count} existing series folders", existingSeriesFolderCounts.Count);
+
+            // Deduplication pass: remove bare folders when a folder with ID suffix exists
+            int bareDuplicatesDeleted = 0;
+            var foldersToRemove = new List<string>();
+            foreach (var kvp in existingSeriesFolderCounts)
+            {
+                var folderName = Path.GetFileName(kvp.Key);
+                // Only check bare folders (no "[" suffix)
+                if (folderName.Contains(" [", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var parentDir = Path.GetDirectoryName(kvp.Key)!;
+                var prefix = folderName + " [";
+                // Check if a folder with ID suffix exists in the same parent
+                try
+                {
+                    var withId = Directory.GetDirectories(parentDir)
+                        .FirstOrDefault(d => Path.GetFileName(d).StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+                    if (withId != null)
+                    {
+                        Directory.Delete(kvp.Key, true);
+                        foldersToRemove.Add(kvp.Key);
+                        bareDuplicatesDeleted++;
+                        _logger.LogInformation("Deleted bare duplicate: '{BareName}' (reusing '{IdName}')", folderName, Path.GetFileName(withId));
+                    }
+                }
+                catch (IOException ex)
+                {
+                    _logger.LogWarning(ex, "Failed to delete bare duplicate folder '{Folder}'", folderName);
+                }
+            }
+
+            // Remove deleted folders from tracking dictionaries
+            foreach (var path in foldersToRemove)
+            {
+                existingSeriesFolderCounts.Remove(path);
+            }
+
+            if (bareDuplicatesDeleted > 0)
+            {
+                _logger.LogInformation("Deduplication pass: deleted {Count} bare duplicate series folders", bareDuplicatesDeleted);
+            }
         }
 
         int preApiSkipped = 0;
@@ -2295,11 +2403,16 @@ public partial class StrmSyncService
                 }
 
                 // Complete NFOs for unchanged series that are missing media info
+                // Cap at 200 per batch to avoid extremely long syncs when provider is slow
+                const int MaxNfoCompletionPerBatch = 200;
                 if (nfoIncompleteSeries.Count > 0)
                 {
-                    _logger.LogInformation("Found {Count} unchanged series with incomplete NFOs, fetching media info...", nfoIncompleteSeries.Count);
+                    var nfoToProcess = nfoIncompleteSeries.Count > MaxNfoCompletionPerBatch
+                        ? nfoIncompleteSeries.Take(MaxNfoCompletionPerBatch).ToList()
+                        : nfoIncompleteSeries;
+                    _logger.LogInformation("Found {Count} unchanged series with incomplete NFOs, fetching media info for {Processing}...", nfoIncompleteSeries.Count, nfoToProcess.Count);
                     int seriesNfoCompleted = 0;
-                    foreach (var (series, seriesFolder) in nfoIncompleteSeries)
+                    foreach (var (series, seriesFolder) in nfoToProcess)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         try
@@ -2776,17 +2889,25 @@ public partial class StrmSyncService
                                 }
                             }
                         }
-                        else if (!Directory.Exists(seriesFolderPath) && Directory.Exists(seriesBasePath))
+                        else if (Directory.Exists(seriesBasePath))
                         {
                             // No ID in folder name — check if a folder with ID already exists (from previous sync)
                             try
                             {
-                                var existingWithId = Directory.GetDirectories(seriesBasePath, seriesFolderName + " [*");
+                                var prefix = seriesFolderName + " [";
+                                var existingWithId = Directory.GetDirectories(seriesBasePath)
+                                    .Where(d => Path.GetFileName(d).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                                    .ToArray();
                                 if (existingWithId.Length > 0)
                                 {
-                                    // Reuse the existing folder with ID instead of creating a bare folder
+                                    if (Directory.Exists(seriesFolderPath))
+                                    {
+                                        // Both bare and ID folder exist — delete bare, use ID folder
+                                        Directory.Delete(seriesFolderPath, true);
+                                        _logger.LogInformation("Deleted bare duplicate: '{BareName}' (reusing '{IdName}')", seriesFolderName, Path.GetFileName(existingWithId[0]));
+                                    }
+
                                     seriesFolderPath = existingWithId[0];
-                                    _logger.LogDebug("Reusing existing ID folder: '{FolderName}'", Path.GetFileName(existingWithId[0]));
                                 }
                             }
                             catch (IOException)

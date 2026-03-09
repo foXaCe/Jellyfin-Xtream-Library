@@ -1739,6 +1739,26 @@ public partial class StrmSyncService
                             : Path.Combine(moviesPath, targetFolder);
                         string movieFolder = Path.Combine(movieBasePath, folderName);
 
+                        // Rename old folder if it exists without ID suffix (e.g., "Silo (2024)" → "Silo (2024) [tmdbid-12345]")
+                        if (!Directory.Exists(movieFolder) && folderName.Contains(" [", StringComparison.Ordinal))
+                        {
+                            var bracketIdx = folderName.LastIndexOf(" [", StringComparison.Ordinal);
+                            var baseNameOnly = folderName[..bracketIdx];
+                            var oldFolderPath = Path.Combine(movieBasePath, baseNameOnly);
+                            if (Directory.Exists(oldFolderPath))
+                            {
+                                try
+                                {
+                                    Directory.Move(oldFolderPath, movieFolder);
+                                    _logger.LogInformation("Renamed movie folder: '{OldName}' → '{NewName}'", baseNameOnly, folderName);
+                                }
+                                catch (IOException ex)
+                                {
+                                    _logger.LogWarning(ex, "Failed to rename movie folder '{OldName}', will create new folder", baseNameOnly);
+                                }
+                            }
+                        }
+
                         foreach (var (streamUrl, strmFileName) in strmEntries)
                         {
                         string strmPath = Path.Combine(movieFolder, strmFileName);
@@ -2703,6 +2723,27 @@ public partial class StrmSyncService
                             ? seriesPath
                             : Path.Combine(seriesPath, targetFolder);
                         string seriesFolderPath = Path.Combine(seriesBasePath, seriesFolderName);
+
+                        // Rename old folder if it exists without ID suffix (e.g., "Silo" → "Silo [tvdbid-403245]")
+                        if (!Directory.Exists(seriesFolderPath) && seriesFolderName.Contains(" [", StringComparison.Ordinal))
+                        {
+                            var bracketIdx = seriesFolderName.LastIndexOf(" [", StringComparison.Ordinal);
+                            var baseNameOnly = seriesFolderName[..bracketIdx];
+                            var oldFolderPath = Path.Combine(seriesBasePath, baseNameOnly);
+                            if (Directory.Exists(oldFolderPath))
+                            {
+                                try
+                                {
+                                    Directory.Move(oldFolderPath, seriesFolderPath);
+                                    _logger.LogInformation("Renamed series folder: '{OldName}' → '{NewName}'", baseNameOnly, seriesFolderName);
+                                }
+                                catch (IOException ex)
+                                {
+                                    _logger.LogWarning(ex, "Failed to rename series folder '{OldName}', will create new folder", baseNameOnly);
+                                }
+                            }
+                        }
+
                         bool isNewSeries = !Directory.Exists(seriesFolderPath);
 
                         foreach (var seasonEntry in seriesInfo.Episodes)

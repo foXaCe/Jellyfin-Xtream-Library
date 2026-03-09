@@ -30,6 +30,7 @@ namespace Jellyfin.Xtream.Library;
 public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 {
     private static volatile Plugin? _instance;
+    private readonly object _credsLock = new();
     private ConnectionInfo? _cachedCreds;
 
     /// <summary>
@@ -62,16 +63,19 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     {
         get
         {
-            var config = Configuration;
-            if (_cachedCreds == null ||
-                _cachedCreds.BaseUrl != config.BaseUrl ||
-                _cachedCreds.UserName != config.Username ||
-                _cachedCreds.Password != config.Password)
+            lock (_credsLock)
             {
-                _cachedCreds = new ConnectionInfo(config.BaseUrl, config.Username, config.Password);
-            }
+                var config = Configuration;
+                if (_cachedCreds == null ||
+                    _cachedCreds.BaseUrl != config.BaseUrl ||
+                    _cachedCreds.UserName != config.Username ||
+                    _cachedCreds.Password != config.Password)
+                {
+                    _cachedCreds = new ConnectionInfo(config.BaseUrl, config.Username, config.Password);
+                }
 
-            return _cachedCreds;
+                return _cachedCreds;
+            }
         }
     }
 

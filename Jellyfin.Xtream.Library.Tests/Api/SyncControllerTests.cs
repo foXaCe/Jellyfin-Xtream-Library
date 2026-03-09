@@ -66,7 +66,6 @@ public class SyncControllerTests
             mockFileSystem.Object,
             _mockMetadataLookup.Object,
             snapshotService,
-            deltaCalculator,
             appPathsMock.Object,
             _mockSyncServiceLogger.Object);
 
@@ -266,7 +265,6 @@ public class SyncControllerTests
                 mockFileSystem.Object,
                 _mockMetadataLookup.Object,
                 snapshotService,
-                deltaCalculator,
                 appPathsMock.Object,
                 _mockSyncServiceLogger.Object);
 

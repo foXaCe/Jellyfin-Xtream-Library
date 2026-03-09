@@ -148,7 +148,23 @@ public class SyncLibraryTask : IScheduledTask, IConfigurableScheduledTask
     /// <inheritdoc />
     public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
     {
-        var config = Plugin.Instance.Configuration;
+        PluginConfiguration config;
+        try
+        {
+            config = Plugin.Instance.Configuration;
+        }
+        catch (InvalidOperationException)
+        {
+            // Plugin not yet initialized at startup — use default interval
+            return new[]
+            {
+                new TaskTriggerInfo
+                {
+                    Type = TaskTriggerInfoType.IntervalTrigger,
+                    IntervalTicks = TimeSpan.FromMinutes(60).Ticks,
+                },
+            };
+        }
 
         // Check schedule type
         if (string.Equals(config.SyncScheduleType, "Daily", StringComparison.OrdinalIgnoreCase))

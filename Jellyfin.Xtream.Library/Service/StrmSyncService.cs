@@ -51,7 +51,6 @@ public partial class StrmSyncService
     private readonly IFileSystem _fileSystem;
     private readonly IMetadataLookupService _metadataLookup;
     private readonly SnapshotService _snapshotService;
-    private readonly DeltaCalculator _deltaCalculator;
     private readonly IServerApplicationPaths _appPaths;
     private readonly ILogger<StrmSyncService> _logger;
     private readonly object _ctsLock = new();
@@ -71,7 +70,6 @@ public partial class StrmSyncService
     /// <param name="fileSystem">The file system abstraction.</param>
     /// <param name="metadataLookup">The metadata lookup service.</param>
     /// <param name="snapshotService">The snapshot persistence service.</param>
-    /// <param name="deltaCalculator">The delta calculator for incremental sync.</param>
     /// <param name="appPaths">The application paths service.</param>
     /// <param name="logger">The logger instance.</param>
     public StrmSyncService(
@@ -82,7 +80,6 @@ public partial class StrmSyncService
         IFileSystem fileSystem,
         IMetadataLookupService metadataLookup,
         SnapshotService snapshotService,
-        DeltaCalculator deltaCalculator,
         IServerApplicationPaths appPaths,
         ILogger<StrmSyncService> logger)
     {
@@ -93,7 +90,6 @@ public partial class StrmSyncService
         _fileSystem = fileSystem;
         _metadataLookup = metadataLookup;
         _snapshotService = snapshotService;
-        _deltaCalculator = deltaCalculator;
         _appPaths = appPaths;
         _logger = logger;
 
@@ -832,7 +828,7 @@ public partial class StrmSyncService
 
                 foreach (var orphan in safeOrphans)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
+                    linkedToken.ThrowIfCancellationRequested();
 
                     try
                     {
@@ -2005,10 +2001,10 @@ public partial class StrmSyncService
             streamBag = null!;
         } // End of batch loop
 
-        // Update result with thread-safe counters
-        result.MoviesCreated += moviesCreated;
-        result.MoviesUpdated += moviesUpdated;
-        result.MoviesSkipped += moviesSkipped;
+        // Update result with thread-safe atomic operations
+        result.AddMoviesCreated(moviesCreated);
+        result.AddMoviesUpdated(moviesUpdated);
+        result.AddMoviesSkipped(moviesSkipped);
         result.AddErrors(errors);
         result.AddFailedItems(failedItems);
         result.MoviesUnmatched = unmatchedCount;
@@ -3130,14 +3126,14 @@ public partial class StrmSyncService
             seriesBag = null!;
         } // End of batch loop
 
-        // Update result with thread-safe counters
-        result.SeriesCreated += seriesCreated;
-        result.SeriesSkipped += seriesSkipped;
-        result.SeasonsCreated += seasonsCreated;
-        result.SeasonsSkipped += seasonsSkipped;
-        result.EpisodesCreated += episodesCreated;
-        result.EpisodesUpdated += episodesUpdated;
-        result.EpisodesSkipped += episodesSkipped;
+        // Update result with thread-safe atomic operations
+        result.AddSeriesCreated(seriesCreated);
+        result.AddSeriesSkipped(seriesSkipped);
+        result.AddSeasonsCreated(seasonsCreated);
+        result.AddSeasonsSkipped(seasonsSkipped);
+        result.AddEpisodesCreated(episodesCreated);
+        result.AddEpisodesUpdated(episodesUpdated);
+        result.AddEpisodesSkipped(episodesSkipped);
         result.AddErrors(errors);
         result.AddFailedItems(failedItems);
         result.SeriesUnmatched = unmatchedCount;
@@ -4053,6 +4049,23 @@ public class SyncResult
     private readonly List<FailedItem> _failedItems = new();
     private readonly object _failedItemsLock = new();
     private int _errors;
+    private int _moviesCreated;
+    private int _moviesSkipped;
+    private int _moviesUpdated;
+    private int _moviesDeleted;
+    private int _seriesCreated;
+    private int _seriesSkipped;
+    private int _seriesDeleted;
+    private int _seasonsCreated;
+    private int _seasonsSkipped;
+    private int _seasonsDeleted;
+    private int _episodesCreated;
+    private int _episodesSkipped;
+    private int _episodesUpdated;
+    private int _episodesDeleted;
+    private int _filesDeleted;
+    private int _moviesUnmatched;
+    private int _seriesUnmatched;
 
     /// <summary>
     /// Gets or sets the start time of the sync.
@@ -4075,24 +4088,40 @@ public class SyncResult
     public string? Error { get; set; }
 
     /// <summary>
-    /// Gets or sets the number of movies created.
+    /// Gets or sets the number of movies created. Thread-safe via Interlocked.
     /// </summary>
-    public int MoviesCreated { get; set; }
+    public int MoviesCreated
+    {
+        get => Volatile.Read(ref _moviesCreated);
+        set => Volatile.Write(ref _moviesCreated, value);
+    }
 
     /// <summary>
-    /// Gets or sets the number of movies skipped (already existed).
+    /// Gets or sets the number of movies skipped. Thread-safe via Interlocked.
     /// </summary>
-    public int MoviesSkipped { get; set; }
+    public int MoviesSkipped
+    {
+        get => Volatile.Read(ref _moviesSkipped);
+        set => Volatile.Write(ref _moviesSkipped, value);
+    }
 
     /// <summary>
-    /// Gets or sets the number of movies updated (STRM content changed).
+    /// Gets or sets the number of movies updated. Thread-safe via Interlocked.
     /// </summary>
-    public int MoviesUpdated { get; set; }
+    public int MoviesUpdated
+    {
+        get => Volatile.Read(ref _moviesUpdated);
+        set => Volatile.Write(ref _moviesUpdated, value);
+    }
 
     /// <summary>
-    /// Gets or sets the number of movies deleted (orphans).
+    /// Gets or sets the number of movies deleted. Thread-safe via Interlocked.
     /// </summary>
-    public int MoviesDeleted { get; set; }
+    public int MoviesDeleted
+    {
+        get => Volatile.Read(ref _moviesDeleted);
+        set => Volatile.Write(ref _moviesDeleted, value);
+    }
 
     /// <summary>
     /// Gets the total number of movies (created + skipped + updated).
@@ -4100,19 +4129,31 @@ public class SyncResult
     public int TotalMovies => MoviesCreated + MoviesSkipped + MoviesUpdated;
 
     /// <summary>
-    /// Gets or sets the number of series created.
+    /// Gets or sets the number of series created. Thread-safe via Interlocked.
     /// </summary>
-    public int SeriesCreated { get; set; }
+    public int SeriesCreated
+    {
+        get => Volatile.Read(ref _seriesCreated);
+        set => Volatile.Write(ref _seriesCreated, value);
+    }
 
     /// <summary>
-    /// Gets or sets the number of series skipped (already existed).
+    /// Gets or sets the number of series skipped. Thread-safe via Interlocked.
     /// </summary>
-    public int SeriesSkipped { get; set; }
+    public int SeriesSkipped
+    {
+        get => Volatile.Read(ref _seriesSkipped);
+        set => Volatile.Write(ref _seriesSkipped, value);
+    }
 
     /// <summary>
-    /// Gets or sets the number of series deleted (orphans).
+    /// Gets or sets the number of series deleted. Thread-safe via Interlocked.
     /// </summary>
-    public int SeriesDeleted { get; set; }
+    public int SeriesDeleted
+    {
+        get => Volatile.Read(ref _seriesDeleted);
+        set => Volatile.Write(ref _seriesDeleted, value);
+    }
 
     /// <summary>
     /// Gets the total number of series (created + skipped).
@@ -4120,19 +4161,31 @@ public class SyncResult
     public int TotalSeries => SeriesCreated + SeriesSkipped;
 
     /// <summary>
-    /// Gets or sets the number of seasons created.
+    /// Gets or sets the number of seasons created. Thread-safe via Interlocked.
     /// </summary>
-    public int SeasonsCreated { get; set; }
+    public int SeasonsCreated
+    {
+        get => Volatile.Read(ref _seasonsCreated);
+        set => Volatile.Write(ref _seasonsCreated, value);
+    }
 
     /// <summary>
-    /// Gets or sets the number of seasons skipped (already existed).
+    /// Gets or sets the number of seasons skipped. Thread-safe via Interlocked.
     /// </summary>
-    public int SeasonsSkipped { get; set; }
+    public int SeasonsSkipped
+    {
+        get => Volatile.Read(ref _seasonsSkipped);
+        set => Volatile.Write(ref _seasonsSkipped, value);
+    }
 
     /// <summary>
-    /// Gets or sets the number of seasons deleted (orphans).
+    /// Gets or sets the number of seasons deleted. Thread-safe via Interlocked.
     /// </summary>
-    public int SeasonsDeleted { get; set; }
+    public int SeasonsDeleted
+    {
+        get => Volatile.Read(ref _seasonsDeleted);
+        set => Volatile.Write(ref _seasonsDeleted, value);
+    }
 
     /// <summary>
     /// Gets the total number of seasons (created + skipped).
@@ -4140,24 +4193,40 @@ public class SyncResult
     public int TotalSeasons => SeasonsCreated + SeasonsSkipped;
 
     /// <summary>
-    /// Gets or sets the number of episodes created.
+    /// Gets or sets the number of episodes created. Thread-safe via Interlocked.
     /// </summary>
-    public int EpisodesCreated { get; set; }
+    public int EpisodesCreated
+    {
+        get => Volatile.Read(ref _episodesCreated);
+        set => Volatile.Write(ref _episodesCreated, value);
+    }
 
     /// <summary>
-    /// Gets or sets the number of episodes skipped (already existed).
+    /// Gets or sets the number of episodes skipped. Thread-safe via Interlocked.
     /// </summary>
-    public int EpisodesSkipped { get; set; }
+    public int EpisodesSkipped
+    {
+        get => Volatile.Read(ref _episodesSkipped);
+        set => Volatile.Write(ref _episodesSkipped, value);
+    }
 
     /// <summary>
-    /// Gets or sets the number of episodes updated (STRM content changed).
+    /// Gets or sets the number of episodes updated. Thread-safe via Interlocked.
     /// </summary>
-    public int EpisodesUpdated { get; set; }
+    public int EpisodesUpdated
+    {
+        get => Volatile.Read(ref _episodesUpdated);
+        set => Volatile.Write(ref _episodesUpdated, value);
+    }
 
     /// <summary>
-    /// Gets or sets the number of episodes deleted (orphans).
+    /// Gets or sets the number of episodes deleted. Thread-safe via Interlocked.
     /// </summary>
-    public int EpisodesDeleted { get; set; }
+    public int EpisodesDeleted
+    {
+        get => Volatile.Read(ref _episodesDeleted);
+        set => Volatile.Write(ref _episodesDeleted, value);
+    }
 
     /// <summary>
     /// Gets the total number of episodes (created + skipped + updated).
@@ -4165,12 +4234,16 @@ public class SyncResult
     public int TotalEpisodes => EpisodesCreated + EpisodesSkipped + EpisodesUpdated;
 
     /// <summary>
-    /// Gets or sets the number of files deleted (orphans) - legacy, use specific counts.
+    /// Gets or sets the number of files deleted (orphans). Thread-safe via Interlocked.
     /// </summary>
-    public int FilesDeleted { get; set; }
+    public int FilesDeleted
+    {
+        get => Volatile.Read(ref _filesDeleted);
+        set => Volatile.Write(ref _filesDeleted, value);
+    }
 
     /// <summary>
-    /// Gets or sets the number of errors encountered. Thread-safe for concurrent movie+series sync.
+    /// Gets or sets the number of errors encountered. Thread-safe via Interlocked.
     /// </summary>
     public int Errors
     {
@@ -4200,14 +4273,22 @@ public class SyncResult
     public TimeSpan Duration => EndTime - StartTime;
 
     /// <summary>
-    /// Gets or sets the number of movies that could not be matched to TMDb.
+    /// Gets or sets the number of movies that could not be matched to TMDb. Thread-safe.
     /// </summary>
-    public int MoviesUnmatched { get; set; }
+    public int MoviesUnmatched
+    {
+        get => Volatile.Read(ref _moviesUnmatched);
+        set => Volatile.Write(ref _moviesUnmatched, value);
+    }
 
     /// <summary>
-    /// Gets or sets the number of series that could not be matched to TVDb.
+    /// Gets or sets the number of series that could not be matched to TVDb. Thread-safe.
     /// </summary>
-    public int SeriesUnmatched { get; set; }
+    public int SeriesUnmatched
+    {
+        get => Volatile.Read(ref _seriesUnmatched);
+        set => Volatile.Write(ref _seriesUnmatched, value);
+    }
 
     /// <summary>
     /// Gets or sets a value indicating whether this sync was incremental (vs full).
@@ -4219,6 +4300,46 @@ public class SyncResult
     /// </summary>
     /// <param name="count">The number of errors to add.</param>
     internal void AddErrors(int count) => Interlocked.Add(ref _errors, count);
+
+    /// <summary>Atomically adds to MoviesCreated.</summary>
+    /// <param name="count">Value to add.</param>
+    internal void AddMoviesCreated(int count) => Interlocked.Add(ref _moviesCreated, count);
+
+    /// <summary>Atomically adds to MoviesSkipped.</summary>
+    /// <param name="count">Value to add.</param>
+    internal void AddMoviesSkipped(int count) => Interlocked.Add(ref _moviesSkipped, count);
+
+    /// <summary>Atomically adds to MoviesUpdated.</summary>
+    /// <param name="count">Value to add.</param>
+    internal void AddMoviesUpdated(int count) => Interlocked.Add(ref _moviesUpdated, count);
+
+    /// <summary>Atomically adds to SeriesCreated.</summary>
+    /// <param name="count">Value to add.</param>
+    internal void AddSeriesCreated(int count) => Interlocked.Add(ref _seriesCreated, count);
+
+    /// <summary>Atomically adds to SeriesSkipped.</summary>
+    /// <param name="count">Value to add.</param>
+    internal void AddSeriesSkipped(int count) => Interlocked.Add(ref _seriesSkipped, count);
+
+    /// <summary>Atomically adds to SeasonsCreated.</summary>
+    /// <param name="count">Value to add.</param>
+    internal void AddSeasonsCreated(int count) => Interlocked.Add(ref _seasonsCreated, count);
+
+    /// <summary>Atomically adds to SeasonsSkipped.</summary>
+    /// <param name="count">Value to add.</param>
+    internal void AddSeasonsSkipped(int count) => Interlocked.Add(ref _seasonsSkipped, count);
+
+    /// <summary>Atomically adds to EpisodesCreated.</summary>
+    /// <param name="count">Value to add.</param>
+    internal void AddEpisodesCreated(int count) => Interlocked.Add(ref _episodesCreated, count);
+
+    /// <summary>Atomically adds to EpisodesUpdated.</summary>
+    /// <param name="count">Value to add.</param>
+    internal void AddEpisodesUpdated(int count) => Interlocked.Add(ref _episodesUpdated, count);
+
+    /// <summary>Atomically adds to EpisodesSkipped.</summary>
+    /// <param name="count">Value to add.</param>
+    internal void AddEpisodesSkipped(int count) => Interlocked.Add(ref _episodesSkipped, count);
 
     /// <summary>
     /// Adds a failed item to the list. Thread-safe.

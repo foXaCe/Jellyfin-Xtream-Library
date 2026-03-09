@@ -264,11 +264,30 @@ public static class NfoWriter
 
         try
         {
-            var content = File.ReadAllText(nfoPath);
-            // Check for actual content inside streamdetails (video or audio sections)
-            return content.Contains("<streamdetails>", StringComparison.OrdinalIgnoreCase) &&
-                   (content.Contains("<video>", StringComparison.OrdinalIgnoreCase) ||
-                    content.Contains("<audio>", StringComparison.OrdinalIgnoreCase));
+            // Read line by line instead of the full file to reduce I/O and GC pressure.
+            // NFO files are small XML; streamdetails is near the end but still within
+            // the first ~20 lines for typical files.
+            bool hasStreamDetails = false;
+            bool hasVideoOrAudio = false;
+            using var reader = new StreamReader(nfoPath);
+            string? line;
+            while ((line = reader.ReadLine()) != null)
+            {
+                if (!hasStreamDetails && line.Contains("<streamdetails>", StringComparison.OrdinalIgnoreCase))
+                {
+                    hasStreamDetails = true;
+                }
+
+                if (hasStreamDetails &&
+                    (line.Contains("<video>", StringComparison.OrdinalIgnoreCase) ||
+                     line.Contains("<audio>", StringComparison.OrdinalIgnoreCase)))
+                {
+                    hasVideoOrAudio = true;
+                    break;
+                }
+            }
+
+            return hasStreamDetails && hasVideoOrAudio;
         }
         catch (IOException)
         {

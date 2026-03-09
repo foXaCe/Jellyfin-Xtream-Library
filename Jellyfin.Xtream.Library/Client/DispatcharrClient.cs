@@ -26,6 +26,7 @@ using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
 #pragma warning disable CS1591
+#pragma warning disable CA1001 // SemaphoreSlim lifetime managed by DI container
 namespace Jellyfin.Xtream.Library.Client;
 
 /// <summary>
@@ -35,10 +36,11 @@ public class DispatcharrClient : IDispatcharrClient
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<DispatcharrClient> _logger;
+    private readonly SemaphoreSlim _tokenLock = new(1, 1);
 
     private string _username = string.Empty;
     private string _password = string.Empty;
-    private string? _accessToken;
+    private volatile string? _accessToken;
     private string? _refreshToken;
     private DateTime _tokenExpiry = DateTime.MinValue;
 
@@ -220,23 +222,39 @@ public class DispatcharrClient : IDispatcharrClient
 
     private async Task EnsureTokenAsync(string baseUrl, CancellationToken cancellationToken)
     {
+        // Fast path: token is still valid (volatile read)
         if (_accessToken != null && DateTime.UtcNow < _tokenExpiry)
         {
             return;
         }
 
-        // Try refresh first if we have a refresh token
-        if (_refreshToken != null)
+        // Serialize token acquisition to prevent concurrent login storms
+        await _tokenLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            var refreshed = await RefreshTokenAsync(baseUrl, cancellationToken).ConfigureAwait(false);
-            if (refreshed)
+            // Double-check after acquiring lock
+            if (_accessToken != null && DateTime.UtcNow < _tokenExpiry)
             {
                 return;
             }
-        }
 
-        // Full login
-        await LoginAsync(baseUrl, cancellationToken).ConfigureAwait(false);
+            // Try refresh first if we have a refresh token
+            if (_refreshToken != null)
+            {
+                var refreshed = await RefreshTokenAsync(baseUrl, cancellationToken).ConfigureAwait(false);
+                if (refreshed)
+                {
+                    return;
+                }
+            }
+
+            // Full login
+            await LoginAsync(baseUrl, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _tokenLock.Release();
+        }
     }
 
     private async Task<DispatcharrTokenResponse?> LoginAsync(string baseUrl, CancellationToken cancellationToken)

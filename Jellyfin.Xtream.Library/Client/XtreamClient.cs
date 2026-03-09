@@ -42,6 +42,11 @@ namespace Jellyfin.Xtream.Library.Client;
 /// <param name="logger">Instance of the <see cref="ILogger"/> interface.</param>
 public class XtreamClient(HttpClient client, ILogger<XtreamClient> logger) : IXtreamClient
 {
+    // Circuit breaker: after ConsecutiveFailureThreshold consecutive failures,
+    // stop attempting requests for CircuitBreakerCooldownSeconds.
+    private const int ConsecutiveFailureThreshold = 10;
+    private const int CircuitBreakerCooldownSeconds = 120;
+
     private static readonly ConcurrentDictionary<Type, PropertyInfo[]> PropertyCache = new();
 
     private readonly JsonSerializerSettings _serializerSettings = new()
@@ -51,6 +56,8 @@ public class XtreamClient(HttpClient client, ILogger<XtreamClient> logger) : IXt
 
     private readonly object _userAgentLock = new();
     private volatile bool _userAgentConfigured;
+    private int _consecutiveFailures;
+    private DateTime _circuitOpenUntil = DateTime.MinValue;
 
     /// <summary>
     /// Gets or sets the delay in milliseconds between API requests.
@@ -205,6 +212,13 @@ public class XtreamClient(HttpClient client, ILogger<XtreamClient> logger) : IXt
     private async Task<string> GetStringWithRetryAsync(Uri uri, CancellationToken cancellationToken)
     {
         EnsureUserAgent();
+
+        // Circuit breaker: if too many consecutive failures, fail fast
+        if (_consecutiveFailures >= ConsecutiveFailureThreshold && DateTime.UtcNow < _circuitOpenUntil)
+        {
+            throw new HttpRequestException($"Circuit breaker open: {_consecutiveFailures} consecutive failures. Cooling down until {_circuitOpenUntil:HH:mm:ss}");
+        }
+
         int retryCount = 0;
         int currentDelay = RetryDelayMs;
 
@@ -216,6 +230,9 @@ public class XtreamClient(HttpClient client, ILogger<XtreamClient> logger) : IXt
                 response.EnsureSuccessStatusCode();
 
                 var content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+                // Success: reset circuit breaker
+                Interlocked.Exchange(ref _consecutiveFailures, 0);
 
                 // Apply request delay to prevent rate limiting
                 if (RequestDelayMs > 0)
@@ -230,6 +247,14 @@ public class XtreamClient(HttpClient client, ILogger<XtreamClient> logger) : IXt
             {
                 if (retryCount >= MaxRetries)
                 {
+                    // Track consecutive failures for circuit breaker
+                    int failures = Interlocked.Increment(ref _consecutiveFailures);
+                    if (failures >= ConsecutiveFailureThreshold)
+                    {
+                        _circuitOpenUntil = DateTime.UtcNow.AddSeconds(CircuitBreakerCooldownSeconds);
+                        logger.LogWarning("Circuit breaker opened after {Failures} consecutive failures. Cooling down for {Seconds}s", failures, CircuitBreakerCooldownSeconds);
+                    }
+
                     logger.LogError("HTTP {StatusCode} after {Retries} retries for URL: {Url}", (int?)ex.StatusCode, retryCount, uri);
                     throw;
                 }

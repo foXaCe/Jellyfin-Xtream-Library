@@ -1739,8 +1739,8 @@ public partial class StrmSyncService
                             : Path.Combine(moviesPath, targetFolder);
                         string movieFolder = Path.Combine(movieBasePath, folderName);
 
-                        // Rename old folder if it exists without ID suffix (e.g., "Silo (2024)" → "Silo (2024) [tmdbid-12345]")
-                        if (!Directory.Exists(movieFolder) && folderName.Contains(" [", StringComparison.Ordinal))
+                        // Clean up duplicate folders: handle both directions
+                        if (folderName.Contains(" [", StringComparison.Ordinal))
                         {
                             var bracketIdx = folderName.LastIndexOf(" [", StringComparison.Ordinal);
                             var baseNameOnly = folderName[..bracketIdx];
@@ -1749,13 +1749,36 @@ public partial class StrmSyncService
                             {
                                 try
                                 {
-                                    Directory.Move(oldFolderPath, movieFolder);
-                                    _logger.LogInformation("Renamed movie folder: '{OldName}' → '{NewName}'", baseNameOnly, folderName);
+                                    if (Directory.Exists(movieFolder))
+                                    {
+                                        Directory.Delete(oldFolderPath, true);
+                                        _logger.LogInformation("Deleted duplicate movie folder: '{OldName}' (kept '{NewName}')", baseNameOnly, folderName);
+                                    }
+                                    else
+                                    {
+                                        Directory.Move(oldFolderPath, movieFolder);
+                                        _logger.LogInformation("Renamed movie folder: '{OldName}' → '{NewName}'", baseNameOnly, folderName);
+                                    }
                                 }
                                 catch (IOException ex)
                                 {
-                                    _logger.LogWarning(ex, "Failed to rename movie folder '{OldName}', will create new folder", baseNameOnly);
+                                    _logger.LogWarning(ex, "Failed to clean up old movie folder '{OldName}'", baseNameOnly);
                                 }
+                            }
+                        }
+                        else if (!Directory.Exists(movieFolder) && Directory.Exists(movieBasePath))
+                        {
+                            try
+                            {
+                                var existingWithId = Directory.GetDirectories(movieBasePath, folderName + " [*");
+                                if (existingWithId.Length > 0)
+                                {
+                                    movieFolder = existingWithId[0];
+                                    _logger.LogDebug("Reusing existing ID folder: '{FolderName}'", Path.GetFileName(existingWithId[0]));
+                                }
+                            }
+                            catch (IOException)
+                            {
                             }
                         }
 
@@ -2724,8 +2747,10 @@ public partial class StrmSyncService
                             : Path.Combine(seriesPath, targetFolder);
                         string seriesFolderPath = Path.Combine(seriesBasePath, seriesFolderName);
 
-                        // Rename old folder if it exists without ID suffix (e.g., "Silo" → "Silo [tvdbid-403245]")
-                        if (!Directory.Exists(seriesFolderPath) && seriesFolderName.Contains(" [", StringComparison.Ordinal))
+                        // Clean up duplicate folders: handle both directions
+                        // Case 1: New name has ID, old folder without ID exists → delete old or rename
+                        // Case 2: New name has no ID, but folder with ID already exists → reuse the ID folder
+                        if (seriesFolderName.Contains(" [", StringComparison.Ordinal))
                         {
                             var bracketIdx = seriesFolderName.LastIndexOf(" [", StringComparison.Ordinal);
                             var baseNameOnly = seriesFolderName[..bracketIdx];
@@ -2734,13 +2759,39 @@ public partial class StrmSyncService
                             {
                                 try
                                 {
-                                    Directory.Move(oldFolderPath, seriesFolderPath);
-                                    _logger.LogInformation("Renamed series folder: '{OldName}' → '{NewName}'", baseNameOnly, seriesFolderName);
+                                    if (Directory.Exists(seriesFolderPath))
+                                    {
+                                        Directory.Delete(oldFolderPath, true);
+                                        _logger.LogInformation("Deleted duplicate series folder: '{OldName}' (kept '{NewName}')", baseNameOnly, seriesFolderName);
+                                    }
+                                    else
+                                    {
+                                        Directory.Move(oldFolderPath, seriesFolderPath);
+                                        _logger.LogInformation("Renamed series folder: '{OldName}' → '{NewName}'", baseNameOnly, seriesFolderName);
+                                    }
                                 }
                                 catch (IOException ex)
                                 {
-                                    _logger.LogWarning(ex, "Failed to rename series folder '{OldName}', will create new folder", baseNameOnly);
+                                    _logger.LogWarning(ex, "Failed to clean up old series folder '{OldName}'", baseNameOnly);
                                 }
+                            }
+                        }
+                        else if (!Directory.Exists(seriesFolderPath) && Directory.Exists(seriesBasePath))
+                        {
+                            // No ID in folder name — check if a folder with ID already exists (from previous sync)
+                            try
+                            {
+                                var existingWithId = Directory.GetDirectories(seriesBasePath, seriesFolderName + " [*");
+                                if (existingWithId.Length > 0)
+                                {
+                                    // Reuse the existing folder with ID instead of creating a bare folder
+                                    seriesFolderPath = existingWithId[0];
+                                    _logger.LogDebug("Reusing existing ID folder: '{FolderName}'", Path.GetFileName(existingWithId[0]));
+                                }
+                            }
+                            catch (IOException)
+                            {
+                                // Ignore filesystem errors
                             }
                         }
 
